@@ -6,7 +6,7 @@ indicator("카르마RSI", overlay=true, max_bars_back=500)
 // ═══════════════════════════════════════════════════════════════
 // CHANNEL
 groupCHANNEL = "CHANNEL"
-int   length        = input.int(150, "채널 길이", minval=2, group=groupCHANNEL)
+int   length        = input.int(120, "채널 길이", minval=2, group=groupCHANNEL)
 float channel_width = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=groupCHANNEL)
 bool  mid_disp      = input.bool(true, "50선", inline="mid", group=groupCHANNEL)
 
@@ -67,11 +67,6 @@ f_log_regression(src, len) =>
 f_inRange(cond, lo, hi) =>
     int bars = ta.barssince(cond) + 1
     lo <= bars and bars <= hi
-
-// RSI→가격 매핑 (idx: 0=현재..length-1=과거)
-f_map_to_price_at(idx, r) =>
-    float base = lower_end + lower_slope * idx
-    base + step * (r - lower_threshold)
 
 // ═══════════════════════════════════════════════════════════════
 // [채널 계산] REGRESSION CHANNEL
@@ -172,6 +167,12 @@ float step        = na
 if bar_ready and not na(dev)
     lower_slope := (lower_start - lower_end) / (length - 1)
     step        := (upper_end   - lower_end) / (upper_threshold - lower_threshold)
+
+
+// RSI→가격 매핑 (idx: 0=현재..length-1=과거)
+f_map_to_price_at(idx, r) =>
+    float base = lower_end + lower_slope * idx
+    base + step * (r - lower_threshold)
 
 // 폴리라인 핸들/라벨
 var polyline pl_rsi = na
