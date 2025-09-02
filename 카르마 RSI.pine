@@ -180,6 +180,8 @@ var polyline pl_sig = na
 var label    lbl_rsi = na
 var label    lbl_lo  = na
 var label    lbl_hi  = na
+var array<chart.point> points_rsi = array.new<chart.point>()
+var array<chart.point> points_sig = array.new<chart.point>()
 
 // 마지막 바에서만 폴리라인/라벨 갱신
 if barstate.islast and bar_ready and not na(dev)
@@ -196,7 +198,7 @@ if barstate.islast and bar_ready and not na(dev)
         label.delete(lbl_hi),  lbl_hi  := na
 
     // RSI 폴리라인
-    points_rsi = array.new<chart.point>()
+    array.clear(points_rsi)
     for i = 0 to length - 1
         float y = f_map_to_price_at(i, rsi[i])
         array.push(points_rsi, chart.point.from_index(bar_index[i], y))
@@ -204,7 +206,7 @@ if barstate.islast and bar_ready and not na(dev)
 
     // 시그널 폴리라인
     if sig_disp
-        points_sig = array.new<chart.point>()
+        array.clear(points_sig)
         for i = 0 to length - 1
             float yS = f_map_to_price_at(i, sig[i])
             array.push(points_sig, chart.point.from_index(bar_index[i], yS))
