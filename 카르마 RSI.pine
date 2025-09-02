@@ -65,7 +65,7 @@ f_log_regression(src, len) =>
 
 // 최근 cond가 true였던 시점이 허용 범위 안인지 검사
 f_inRange(cond, lo, hi) =>
-    bars = ta.barssince(cond)
+    int bars = ta.barssince(cond) + 1
     lo <= bars and bars <= hi
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
