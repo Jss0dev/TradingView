@@ -8,11 +8,11 @@ indicator("카르마RSI", overlay=true, max_bars_back=500)
 groupChannel = "CHANNEL"
 int   length        = input.int(150, "채널 길이", minval=2, group=groupChannel)
 float channelWidth  = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=groupChannel)
-bool  midDisp       = input.bool(true, "50선", inline="mid", group=groupChannel)
-bool  fillBand      = input.bool(true, "백그라운드", inline="mid", group=groupChannel)
-color colUp         = input.color(#a7abb9, "라인 색상: 상단", group=groupChannel, inline="Col")
-color colMid        = input.color(color.gray, "중앙", group=groupChannel, inline="Col")
-color colLow        = input.color(#a7abb9, "하단", group=groupChannel, inline="Col")
+
+// 채널 기본 색상 (모습 탭에서 변경 가능)
+color colUp  = #a7abb9
+color colMid = color.gray
+color colLow = #a7abb9
 
 // RSI
 groupRsi = "RSI"
@@ -92,12 +92,6 @@ fMapToPriceAt(idx, r) =>
 // 모습
 // ═══════════════════════════════════════════════════════════════
 color oscCol = color.new(oscColBase, rsiTransp)
-
-var line midLine   = na
-var line upperLine = na
-var line lowerLine = na
-var linefill chFill = na
-
 var polyline plRsi = na
 var polyline plSig = na
 
@@ -105,61 +99,15 @@ var label lblRsi = na
 var label lblLo  = na
 var label lblHi  = na
 
-// ═══════════════════════════════════════════════════════════════
-// 랜더링
-// ═══════════════════════════════════════════════════════════════
-if barReady and not na(dev)
-    // 중앙선(표시 토글 안전 처리)
-    if midDisp
-        if na(midLine)
-            midLine := line.new(bar_index[length], regStart, bar_index, regEnd, xloc=xloc.bar_index, color=colMid, style=line.style_dashed)
-        else
-            line.set_xy1(midLine, bar_index[length], regStart)
-            line.set_xy2(midLine, bar_index,       regEnd)
-            line.set_color(midLine, colMid)
-    else
-        if not na(midLine)
-            line.delete(midLine)
-            midLine := na
+// 채널 플롯 (모습 탭 제어)
+float upperSeries = barReady and not na(dev) ? upperEnd : na
+float midSeries   = barReady and not na(dev) ? regEnd   : na
+float lowerSeries = barReady and not na(dev) ? lowerEnd : na
 
-    // 상단/하단 채널
-    if na(upperLine)
-        upperLine := line.new(bar_index[length], upperStart, bar_index, upperEnd, xloc=xloc.bar_index, color=colUp, width=2)
-    else
-        line.set_xy1(upperLine, bar_index[length], upperStart)
-        line.set_xy2(upperLine, bar_index,         upperEnd)
-        line.set_color(upperLine, colUp)
-    if na(lowerLine)
-        lowerLine := line.new(bar_index[length], lowerStart, bar_index, lowerEnd, xloc=xloc.bar_index, color=colLow, width=2)
-    else
-        line.set_xy1(lowerLine, bar_index[length], lowerStart)
-        line.set_xy2(lowerLine, bar_index,         lowerEnd)
-        line.set_color(lowerLine, colLow)
-
-    // 채널 필
-    if fillBand
-        if na(chFill) and not na(upperLine) and not na(lowerLine)
-            chFill := linefill.new(upperLine, lowerLine, color.new(oscColBase, 95))
-        // line 좌표는 매 bar 갱신되므로 linefill 은 1회 생성으로 충분
-    else
-        if not na(chFill)
-            linefill.delete(chFill)
-            chFill := na
-
-// 초기 바 부족/na 처리: 만들어진 라인은 제거
-if not barReady or na(dev)
-    if not na(midLine)
-        line.delete(midLine)
-        midLine := na
-    if not na(upperLine)
-        line.delete(upperLine)
-        upperLine := na
-    if not na(lowerLine)
-        line.delete(lowerLine)
-        lowerLine := na
-    if not na(chFill)
-        linefill.delete(chFill)
-        chFill := na
+plotUpper = plot(upperSeries, title="Upper", color=colUp,  linewidth=2)
+plotLower = plot(lowerSeries, title="Lower", color=colLow, linewidth=2)
+plotMid   = plot(midSeries,   title="Mid",   color=colMid)
+fill(plotUpper, plotLower, color=color.new(oscColBase, 95), title="Channel Fill")
 
 // 폴리라인 & 라벨(마지막 바에서만 재그리기 → 성능/누수 관리)
 if barstate.islast and barReady and not na(dev)
