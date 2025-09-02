@@ -2,153 +2,280 @@
 indicator("카르마RSI", overlay=true, max_bars_back=500)
 
 // ═══════════════════════════════════════════════════════════════
-// [입력값] INPUTS
+// [계산 입력값] CALC INPUTS
 // ═══════════════════════════════════════════════════════════════
-// 채널
-groupChannel = "CHANNEL"
-int   length        = input.int(150, "채널 길이", minval=2, group=groupChannel)
-float channelWidth  = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=groupChannel)
-
-// 채널 기본 색상 (모습 탭에서 변경 가능)
-color colUp  = #a7abb9
-color colMid = color.gray
-color colLow = #a7abb9
+// CHANNEL
+groupCHANNEL = "CHANNEL"
+int   length        = input.int(150, "채널 길이", minval=2, group=groupCHANNEL)
+float channel_width = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=groupCHANNEL)
+bool  mid_disp      = input.bool(true, "50선", inline="mid", group=groupCHANNEL)
 
 // RSI
-groupRsi = "RSI"
-int   lengthRsi        = input.int(14, "길이", inline="rsi", group=groupRsi)
-color oscColBase       = input.color(color.rgb(161, 0, 182), "", inline="rsi", group=groupRsi)
-int   rsiTransp        = input.int(30, "RSI 선 투명도 (0~100)", minval=0, maxval=100, group=groupRsi)
-int   upperThreshold   = input.int(70, "상단 기준선 (%)", minval=50, maxval=100, step=1, inline="th", group=groupRsi)
-bool  showThresholdLabels = input.bool(true, "기준선 라벨", inline="th", group=groupRsi)
-bool  sigDisp          = input.bool(true, "Signal", inline="sig", group=groupRsi)
-int   lengthSig        = input.int(14, "", inline="sig", group=groupRsi)
-color sigLine          = input.color(color.rgb(255, 0, 0), "", inline="sig", group=groupRsi)
+groupRSI = "RSI"
+int   length_rsi      = input.int(14, "길이", inline="rsi", group=groupRSI)
+int   upper_threshold = input.int(70, "상단 기준선 (%)", minval=50, maxval=100, step=1, inline="th", group=groupRSI)
+int   length_sig      = input.int(14, "", inline="sig", group=groupRSI)
+
+// DIVERGENCE
+groupDIV = "DIVERGENCE"
+bool calc_div   = input.bool(false, "다이버전스 계산", group=groupDIV, tooltip="끄면 계산/표시/알림 모두 비활성")
+int  lbLeft     = input.int(5,  "좌측 룩백",  minval=1, group=groupDIV, inline="lb")
+int  lbRight    = input.int(5,  "우측 룩백",  minval=1, group=groupDIV, inline="lb")
+int  rgLower    = input.int(5,  "범위 하한", minval=1, group=groupDIV, inline="rg")
+int  rgUpper    = input.int(60, "범위 상한", minval=2, group=groupDIV, inline="rg")
 
 // ═══════════════════════════════════════════════════════════════
-// 계산 로직
+// [스타일 입력값] STYLE INPUTS
 // ═══════════════════════════════════════════════════════════════
-// 로그 회귀 함수
-fLogRegression(src, len) =>
-    // 최근 len개 구간: i=0(현재) ~ i=len-1(과거)
+// CHANNEL
+bool  fill_band     = input.bool(true, "백그라운드", inline="mid", group=groupCHANNEL)
+color col_up        = input.color(#a7abb9, "라인 색상: 상단", group=groupCHANNEL, inline="Col")
+color col_mid       = input.color(color.gray, "중앙", group=groupCHANNEL, inline="Col")
+color col_low       = input.color(#a7abb9, "하단", group=groupCHANNEL, inline="Col")
+
+// RSI
+color osc_col_base           = input.color(color.rgb(161, 0, 182), "", inline="rsi", group=groupRSI)
+int   rsi_transp             = input.int(30, "RSI 선 투명도 (0~100)", minval=0, maxval=100, group=groupRSI)
+bool  show_threshold_labels  = input.bool(true, "기준선 라벨", inline="th", group=groupRSI)
+bool  sig_disp               = input.bool(true, "Signal", inline="sig", group=groupRSI)
+color sig_line               = input.color(color.rgb(255, 0, 0), "", inline="sig", group=groupRSI)
+
+// DIVERGENCE (색상)
+color colRegBull = color.new(color.green,  0)
+color colRegBear = color.new(color.red,    0)
+color colHidBull = color.new(color.teal,   0)
+color colHidBear = color.new(color.orange, 0)
+
+// ═══════════════════════════════════════════════════════════════
+// [유틸 함수] UTILS
+// ═══════════════════════════════════════════════════════════════
+// 로그 회귀 (가격 로그에 대해 회귀 후 지수로 복원)
+f_log_regression(src, len) =>
     float sumX = 0.0, sumY = 0.0, sumXSqr = 0.0, sumXY = 0.0
     for i = 0 to len - 1
         float per = i + 1.0
         float val = math.log(src[i])
-        sumX += per
-        sumY += val
+        sumX   += per
+        sumY   += val
         sumXSqr += per * per
-        sumXY += val * per
+        sumXY  += val * per
     float slope = (len * sumXY - sumX * sumY) / (len * sumXSqr - sumX * sumX)
     float intercept = (sumY - slope * sumX) / len
     [slope, intercept]
 
-// 현재 bar에서 len 구간이 충분한지
-bool barReady = bar_index >= length
+// 최근 cond가 true였던 시점이 허용 범위 안인지 검사
+f_inRange(cond, lo, hi) =>
+    bars = ta.barssince(cond)
+    lo <= bars and bars <= hi
 
-// 회귀선 및 채널 계산(충분한 바가 있어야 함)
-float slope = na
-float intercept = na
-float regStart = na
-float regEnd = na
-float dev = na
-float upperStart = na
-float upperEnd = na
-float lowerStart = na
-float lowerEnd = na
-
-if barReady
-    [slope, intercept] = fLogRegression(close, length)  // ← 다중 할당은 '=' 사용
-    // per 를 1..length 로 잡았으므로,
-    // start(과거) = per=length, end(현재) = per=1
-    regStart := math.exp(intercept + slope * length)
-    regEnd   := math.exp(intercept + slope * 1.0)
-    dev := ta.stdev(close, length)
-    upperStart := regStart + dev * channelWidth
-    upperEnd   := regEnd   + dev * channelWidth
-    lowerStart := regStart - dev * channelWidth
-    lowerEnd   := regEnd   - dev * channelWidth
-
-// RSI & 시그널
-float rsi = ta.rsi(close, lengthRsi)
-float sig = ta.sma(rsi,  lengthSig)
-int   lowerThreshold = 100 - upperThreshold
-
-// 채널 축 ↔ RSI(0~100) 매핑
-// - 각 bar에서 하단 기준선 값: lowerEnd(현재)에서 과거로 갈수록 선형 보간
-float lowerSlope = na
-float step = na
-if barReady and not na(dev)
-    lowerSlope := (lowerStart - lowerEnd) / (length - 1)
-    step       := (upperEnd   - lowerEnd) / (upperThreshold - lowerThreshold)  // 1 RSI 포인트당 가격 변화량
-
-// 매핑 함수 (파라미터 타입 기입/ '=' 금지)
-fMapToPriceAt(idx, r) =>
-    // idx: i=0(현재) .. i=length-1(과거)
-    float base = lowerEnd + lowerSlope * idx
-    base + step * (r - lowerThreshold)
+// RSI→가격 매핑 (idx: 0=현재..length-1=과거)
+f_map_to_price_at(idx, r) =>
+    float base = lower_end + lower_slope * idx
+    base + step * (r - lower_threshold)
 
 // ═══════════════════════════════════════════════════════════════
-// 모습
+// [채널 계산] REGRESSION CHANNEL
 // ═══════════════════════════════════════════════════════════════
-color oscCol = color.new(oscColBase, rsiTransp)
-var polyline plRsi = na
-var polyline plSig = na
+bool  bar_ready   = bar_index >= length
 
-var label lblRsi = na
-var label lblLo  = na
-var label lblHi  = na
+float slope       = na
+float intercept   = na
+float reg_start   = na
+float reg_end     = na
+float dev         = na
+float upper_start = na
+float upper_end   = na
+float lower_start = na
+float lower_end   = na
 
-// 채널 플롯 (모습 탭 제어)
-float upperSeries = barReady and not na(dev) ? upperEnd : na
-float midSeries   = barReady and not na(dev) ? regEnd   : na
-float lowerSeries = barReady and not na(dev) ? lowerEnd : na
+if bar_ready
+    [slope, intercept] = f_log_regression(close, length)
+    reg_start   := math.exp(intercept + slope * length)
+    reg_end     := math.exp(intercept + slope * 1.0)
+    dev         := ta.stdev(close, length)
+    upper_start := reg_start + dev * channel_width
+    upper_end   := reg_end   + dev * channel_width
+    lower_start := reg_start - dev * channel_width
+    lower_end   := reg_end   - dev * channel_width
 
-plotUpper = plot(upperSeries, title="Upper", color=colUp,  linewidth=2)
-plotLower = plot(lowerSeries, title="Lower", color=colLow, linewidth=2)
-plotMid   = plot(midSeries,   title="Mid",   color=colMid)
-fill(plotUpper, plotLower, color=color.new(oscColBase, 95), title="Channel Fill")
+// 라인/필 핸들
+var line     mid_line  = na
+var line     upper_line = na
+var line     lower_line = na
+var linefill ch_fill    = na
 
-// 폴리라인 & 라벨(마지막 바에서만 재그리기 → 성능/누수 관리)
-if barstate.islast and barReady and not na(dev)
-    // 이전 도형/라벨 정리 (각 문장 분리)
-    if not na(plRsi)
-        polyline.delete(plRsi)
-        plRsi := na
-    if not na(plSig)
-        polyline.delete(plSig)
-        plSig := na
-    if not na(lblRsi)
-        label.delete(lblRsi)
-        lblRsi := na
-    if not na(lblLo)
-        label.delete(lblLo)
-        lblLo := na
-    if not na(lblHi)
-        label.delete(lblHi)
-        lblHi := na
+// 채널 라인/필 업데이트
+if bar_ready and not na(dev)
+    // 중앙선
+    if mid_disp
+        if na(mid_line)
+            mid_line := line.new(bar_index[length], reg_start, bar_index, reg_end,
+                                 xloc=xloc.bar_index, color=col_mid, style=line.style_dashed)
+        else
+            line.set_xy1(mid_line, bar_index[length], reg_start)
+            line.set_xy2(mid_line, bar_index,       reg_end)
+            line.set_color(mid_line, col_mid)
+    else
+        if not na(mid_line)
+            line.delete(mid_line)
+            mid_line := na
+
+    // 상/하단
+    if na(upper_line)
+        upper_line := line.new(bar_index[length], upper_start, bar_index, upper_end,
+                               xloc=xloc.bar_index, color=col_up, width=2)
+    else
+        line.set_xy1(upper_line, bar_index[length], upper_start)
+        line.set_xy2(upper_line, bar_index,         upper_end)
+        line.set_color(upper_line, col_up)
+
+    if na(lower_line)
+        lower_line := line.new(bar_index[length], lower_start, bar_index, lower_end,
+                               xloc=xloc.bar_index, color=col_low, width=2)
+    else
+        line.set_xy1(lower_line, bar_index[length], lower_start)
+        line.set_xy2(lower_line, bar_index,         lower_end)
+        line.set_color(lower_line, col_low)
+
+    // 채움
+    if fill_band
+        if na(ch_fill) and not na(upper_line) and not na(lower_line)
+            ch_fill := linefill.new(upper_line, lower_line, color.new(osc_col_base, 95))
+    else
+        if not na(ch_fill)
+            linefill.delete(ch_fill)
+            ch_fill := na
+
+// 준비 미충족 시 정리
+if not bar_ready or na(dev)
+    if not na(mid_line)
+        line.delete(mid_line),  mid_line  := na
+    if not na(upper_line)
+        line.delete(upper_line), upper_line := na
+    if not na(lower_line)
+        line.delete(lower_line), lower_line := na
+    if not na(ch_fill)
+        linefill.delete(ch_fill), ch_fill := na
+
+// ═══════════════════════════════════════════════════════════════
+// [RSI & 시그널] RSI / SIGNAL
+// ═══════════════════════════════════════════════════════════════
+float rsi = ta.rsi(close, length_rsi)
+float sig = ta.sma(rsi,  length_sig)
+int   lower_threshold = 100 - upper_threshold
+
+color osc_col = color.new(osc_col_base, rsi_transp)
+
+// 채널 축 ↔ RSI 매핑 준비
+float lower_slope = na
+float step        = na
+if bar_ready and not na(dev)
+    lower_slope := (lower_start - lower_end) / (length - 1)
+    step        := (upper_end   - lower_end) / (upper_threshold - lower_threshold)
+
+// 폴리라인 핸들/라벨
+var polyline pl_rsi = na
+var polyline pl_sig = na
+var label    lbl_rsi = na
+var label    lbl_lo  = na
+var label    lbl_hi  = na
+
+// 마지막 바에서만 폴리라인/라벨 갱신
+if barstate.islast and bar_ready and not na(dev)
+    // 정리
+    if not na(pl_rsi)
+        polyline.delete(pl_rsi), pl_rsi := na
+    if not na(pl_sig)
+        polyline.delete(pl_sig), pl_sig := na
+    if not na(lbl_rsi)
+        label.delete(lbl_rsi), lbl_rsi := na
+    if not na(lbl_lo)
+        label.delete(lbl_lo),  lbl_lo  := na
+    if not na(lbl_hi)
+        label.delete(lbl_hi),  lbl_hi  := na
 
     // RSI 폴리라인
-    pointsRsi = array.new<chart.point>()
+    points_rsi = array.new<chart.point>()
     for i = 0 to length - 1
-        float y = fMapToPriceAt(i, rsi[i])
-        array.push(pointsRsi, chart.point.from_index(bar_index[i], y))
-    plRsi := polyline.new(pointsRsi, line_color=oscCol, closed=false, force_overlay=true, line_width=4)
+        float y = f_map_to_price_at(i, rsi[i])
+        array.push(points_rsi, chart.point.from_index(bar_index[i], y))
+    pl_rsi := polyline.new(points_rsi, line_color=osc_col, closed=false, force_overlay=true, line_width=4)
 
-    // Signal 폴리라인 (옵션)
-    if sigDisp
-        pointsSig = array.new<chart.point>()
+    // 시그널 폴리라인
+    if sig_disp
+        points_sig = array.new<chart.point>()
         for i = 0 to length - 1
-            float yS = fMapToPriceAt(i, sig[i])
-            array.push(pointsSig, chart.point.from_index(bar_index[i], yS))
-        plSig := polyline.new(pointsSig, line_color=sigLine, closed=false, force_overlay=true, line_width=2)
+            float yS = f_map_to_price_at(i, sig[i])
+            array.push(points_sig, chart.point.from_index(bar_index[i], yS))
+        pl_sig := polyline.new(points_sig, line_color=sig_line, closed=false, force_overlay=true, line_width=2)
 
-    // 라벨: 현재값/기준선 (옵션)
-    float yNow = fMapToPriceAt(0, rsi)
-    lblRsi := label.new(bar_index, yNow,
-         "카르마 RSI: " + str.tostring(rsi, "#.##"),
-         style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    // 라벨
+    float y_now = f_map_to_price_at(0, rsi)
+    lbl_rsi := label.new(bar_index, y_now, "카르마 RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
 
-    if showThresholdLabels
-        lblLo := label.new(bar_index, lowerEnd, str.tostring(lowerThreshold, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
-        lblHi := label.new(bar_index, upperEnd, str.tostring(upperThreshold, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    if show_threshold_labels
+        lbl_lo := label.new(bar_index, lower_end, str.tostring(lower_threshold, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+        lbl_hi := label.new(bar_index, upper_end, str.tostring(upper_threshold, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+
+// ═══════════════════════════════════════════════════════════════
+// [다이버전스 계산] DIVERGENCE CALC (Regular + Hidden)
+// ═══════════════════════════════════════════════════════════════
+bool regBull = false, regBear = false, hidBull = false, hidBear = false
+
+if calc_div
+    // 피벗
+    bool plFound = not na(ta.pivotlow(rsi,  lbLeft,  lbRight))
+    bool phFound = not na(ta.pivothigh(rsi, lbLeft,  lbRight))
+
+    // 피벗 기준 바의 값 (우측 룩백)
+    float rsiLBR  = rsi[lbRight]
+    float lowLBR  = low[lbRight]
+    float highLBR = high[lbRight]
+
+    // 이전 피벗에서의 참조 값
+    float prev_rsiL_of_PL  = ta.valuewhen(plFound, rsi[lbRight],  1)
+    float prev_lowL_of_PL  = ta.valuewhen(plFound, low[lbRight],  1)
+    float prev_rsiL_of_PH  = ta.valuewhen(phFound, rsi[lbRight],  1)
+    float prev_highL_of_PH = ta.valuewhen(phFound, high[lbRight], 1)
+
+    // Regular Bullish: Price LL & RSI HL (pivotlow)
+    bool rsiHL   = not na(prev_rsiL_of_PL) and rsiLBR  > prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
+    bool priceLL = not na(prev_lowL_of_PL) and lowLBR  < prev_lowL_of_PL
+    regBull := plFound and rsiHL and priceLL
+
+    // Hidden Bullish: Price HL & RSI LL (pivotlow)
+    bool rsiLL   = not na(prev_rsiL_of_PL) and rsiLBR  < prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
+    bool priceHL = not na(prev_lowL_of_PL) and lowLBR  > prev_lowL_of_PL
+    hidBull := plFound and rsiLL and priceHL
+
+    // Regular Bearish: Price HH & RSI LH (pivothigh)
+    bool rsiLH   = not na(prev_rsiL_of_PH) and rsiLBR  < prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
+    bool priceHH = not na(prev_highL_of_PH) and highLBR > prev_highL_of_PH
+    regBear := phFound and rsiLH and priceHH
+
+    // Hidden Bearish: Price LH & RSI HH (pivothigh)
+    bool rsiHH   = not na(prev_rsiL_of_PH) and rsiLBR  > prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
+    bool priceLH = not na(prev_highL_of_PH) and highLBR < prev_highL_of_PH
+    hidBear := phFound and rsiHH and priceLH
+
+// 다이버전스 마커용 좌표(전역 계산)
+float y_div = na
+if bar_ready and not na(dev)
+    y_div := f_map_to_price_at(lbRight, rsi[lbRight])
+
+// 플래그(표시 가능 여부)
+bool canPlotDiv = calc_div and bar_ready and not na(dev)
+
+// ═══════════════════════════════════════════════════════════════
+// [다이버전스 표시/알림] (전역에서 호출: local scope 금지)
+// ═══════════════════════════════════════════════════════════════
+plotshape(canPlotDiv and regBull ? y_div : na, title="Regular Bullish", style=shape.labelup,   text="Reg Bull", color=colRegBull, textcolor=color.white, location=location.absolute, offset=-lbRight)
+plotshape(canPlotDiv and regBear ? y_div : na, title="Regular Bearish", style=shape.labeldown, text="Reg Bear", color=colRegBear, textcolor=color.white, location=location.absolute, offset=-lbRight)
+plotshape(canPlotDiv and hidBull ? y_div : na, title="Hidden Bullish",  style=shape.triangleup,   text="Hid Bull", color=colHidBull, textcolor=color.white, location=location.absolute, offset=-lbRight)
+plotshape(canPlotDiv and hidBear ? y_div : na, title="Hidden Bearish",  style=shape.triangledown, text="Hid Bear", color=colHidBear, textcolor=color.white, location=location.absolute, offset=-lbRight)
+
+// 알림
+alertcondition(calc_div and regBull, title="KarmaRSI Regular Bullish", message="KarmaRSI: Regular Bullish Divergence")
+alertcondition(calc_div and regBear, title="KarmaRSI Regular Bearish", message="KarmaRSI: Regular Bearish Divergence")
+alertcondition(calc_div and hidBull, title="KarmaRSI Hidden Bullish",  message="KarmaRSI: Hidden Bullish Divergence")
+alertcondition(calc_div and hidBear, title="KarmaRSI Hidden Bearish",  message="KarmaRSI: Hidden Bearish Divergence")
