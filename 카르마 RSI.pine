@@ -93,7 +93,9 @@ if bar_ready
     upper_end   := reg_end   + dev * channel_width
     lower_start := reg_start - dev * channel_width
     lower_end   := reg_end   - dev * channel_width
-    slopePct    := (math.exp(slope) - 1) * 100
+    // slope returned by f_log_regression is log(past/current)
+    // convert to percent change from past to current (positive = uptrend)
+    slopePct    := (math.exp(-slope) - 1) * 100
 
 // 라인/필 핸들
 var line     mid_line  = na
