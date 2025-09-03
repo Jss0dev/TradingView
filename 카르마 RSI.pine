@@ -82,7 +82,7 @@ float upper_start = na
 float upper_end   = na
 float lower_start = na
 float lower_end   = na
-float slopePct    = na
+float deltaPricePerMinute = na
 
 if bar_ready
     [slope, intercept] = f_log_regression(close, length)
@@ -94,8 +94,9 @@ if bar_ready
     lower_start := reg_start - dev * channel_width
     lower_end   := reg_end   - dev * channel_width
     // slope returned by f_log_regression is log(past/current)
-    // convert to percent change from past to current (positive = uptrend)
-    slopePct    := (math.exp(-slope) - 1) * 100
+    // compute price change per minute
+    float deltaPricePerBar = (reg_end - reg_start) / (length - 1)
+    deltaPricePerMinute := deltaPricePerBar / (timeframe.in_seconds(timeframe.period) / 60.0)
 
 // 라인/필 핸들
 var line     mid_line  = na
@@ -140,7 +141,8 @@ if bar_ready and not na(dev)
     // 슬로프 라벨
     int    centerX   = bar_index - length / 2
     float  centerY   = (upper_start + upper_end) / 2 + dev * 0.1
-    string slopeText = str.tostring(slopePct, "#.##") + "%"
+    string curr = syminfo.currency
+    string slopeText = str.tostring(deltaPricePerMinute, format.mintick) + " " + curr + "/min"
     if na(lblSlope)
         lblSlope := label.new(centerX, centerY, slopeText, xloc=xloc.bar_index)
     else
