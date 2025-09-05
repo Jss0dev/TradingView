@@ -1,0 +1,134 @@
+//@version=6
+indicator("HL Envelope (EMA-Release) — 4-Zone", shorttitle="HLEMA4Z", overlay=true, max_bars_back=5000)
+
+// ═══════════════════════════════════════════════════════════════
+// INPUT PARAMETERS
+// ═══════════════════════════════════════════════════════════════
+
+// Preset Selection
+GROUP_PRESET = "Quick Settings"
+i_preset = input.string("Recommended (Safe)", "Trading Style Preset", options=["Recommended (Safe)", "Bollinger-like", "Sensitive", "Custom"], group=GROUP_PRESET, tooltip="Choose a preset or select Custom for manual settings")
+
+// Core Trading Parameters (shown only when Custom is selected)
+GROUP_CORE = "Custom Parameters"
+i_halfLife_custom = input.int(28, "Release Half-life (bars)", minval=1, maxval=200, group=GROUP_CORE, tooltip="Controls outer band contraction speed and overall sensitivity")
+i_alpha_custom = input.float(0.62, "Zone Ratio (0~1)", minval=0, maxval=1, step=0.01, group=GROUP_CORE, tooltip="Controls the size of inner zones relative to outer bands")
+
+// Apply preset values or use custom values
+[halfLife, alpha] = switch i_preset
+    "Recommended (Safe)" => [28, 0.62]
+    "Bollinger-like" => [21, 0.53]
+    "Sensitive" => [16, 0.43]
+    => [i_halfLife_custom, i_alpha_custom] // Custom
+
+// Display preset info
+GROUP_INFO = "Current Settings"
+i_showInfo = input.bool(true, "Show Current Values", group=GROUP_INFO)
+
+// Display Settings
+GROUP_DISPLAY = "Display Options"
+i_showLines = input.bool(true, "Show Band Lines", group=GROUP_DISPLAY)
+i_showMiddle = input.bool(true, "Show Middle Line", group=GROUP_DISPLAY)
+
+// Individual Zone Colors
+GROUP_COLORS = "Zone Colors"
+i_upperOuterColor = input.color(color.new(color.teal, 0), "Upper Outer Zone", group=GROUP_COLORS)
+i_upperInnerColor = input.color(color.new(color.blue, 0), "Upper Inner Zone", group=GROUP_COLORS)
+i_lowerInnerColor = input.color(color.new(color.red, 0), "Lower Inner Zone", group=GROUP_COLORS)
+i_lowerOuterColor = input.color(color.new(color.orange, 0), "Lower Outer Zone", group=GROUP_COLORS)
+
+// Zone Opacity Settings
+GROUP_OPACITY = "Zone Opacity"
+i_upperOuterOpacity = input.int(75, "Upper Outer Opacity", minval=0, maxval=100, group=GROUP_OPACITY)
+i_upperInnerOpacity = input.int(85, "Upper Inner Opacity", minval=0, maxval=100, group=GROUP_OPACITY)
+i_lowerInnerOpacity = input.int(85, "Lower Inner Opacity", minval=0, maxval=100, group=GROUP_OPACITY)
+i_lowerOuterOpacity = input.int(75, "Lower Outer Opacity", minval=0, maxval=100, group=GROUP_OPACITY)
+
+// ═══════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ═══════════════════════════════════════════════════════════════
+
+// Calculate decay factor using exponential formula
+decayFactor = 1.0 - math.pow(0.5, 1.0 / halfLife)
+
+// Initialize outer bands with EMA-Release logic
+var float upperOuter = na
+var float lowerOuter = na
+
+// First bar initialization
+if barstate.isfirst
+    upperOuter := high
+    lowerOuter := low
+else
+    // Attack phase: immediate response to new highs/lows
+    // Release phase: exponential decay towards current high/low
+    upperOuter := high > upperOuter[1] ? high : upperOuter[1] - decayFactor * (upperOuter[1] - high)
+    lowerOuter := low < lowerOuter[1] ? low : lowerOuter[1] + decayFactor * (low - lowerOuter[1])
+
+// Calculate middle line
+middleLine = (upperOuter + lowerOuter) * 0.5
+
+// Calculate inner bands using simplified Mid±α×Range method
+halfRange = (upperOuter - lowerOuter) * 0.5
+upperInner = middleLine + alpha * halfRange
+lowerInner = middleLine - alpha * halfRange
+
+// Constrain inner bands to stay within outer bounds and middle line
+constrainedUpperInner = math.min(math.max(upperInner, middleLine), upperOuter)
+constrainedLowerInner = math.max(math.min(lowerInner, middleLine), lowerOuter)
+
+// ═══════════════════════════════════════════════════════════════
+// PLOTTING AND VISUALIZATION
+// ═══════════════════════════════════════════════════════════════
+
+// Plot band lines
+plotUpperOuter = plot(i_showLines ? upperOuter : na, "Upper Outer", color=i_upperOuterColor, linewidth=1)
+plotUpperInner = plot(i_showLines ? constrainedUpperInner : na, "Upper Inner", color=i_upperInnerColor, linewidth=1)
+plotMiddle = plot(i_showMiddle ? middleLine : na, "Middle", color=color.new(color.gray, 0), linewidth=1, style=plot.style_line)
+plotLowerInner = plot(i_showLines ? constrainedLowerInner : na, "Lower Inner", color=i_lowerInnerColor, linewidth=1)
+plotLowerOuter = plot(i_showLines ? lowerOuter : na, "Lower Outer", color=i_lowerOuterColor, linewidth=1)
+
+// Fill the four zones with individual colors and opacity
+fill(plotUpperOuter, plotUpperInner, color=color.new(i_upperOuterColor, i_upperOuterOpacity), title="Upper Outer Zone", editable=false)
+fill(plotUpperInner, plotMiddle, color=color.new(i_upperInnerColor, i_upperInnerOpacity), title="Upper Inner Zone", editable=false)
+fill(plotLowerInner, plotMiddle, color=color.new(i_lowerInnerColor, i_lowerInnerOpacity), title="Lower Inner Zone", editable=false)
+fill(plotLowerOuter, plotLowerInner, color=color.new(i_lowerOuterColor, i_lowerOuterOpacity), title="Lower Outer Zone", editable=false)
+
+// ═══════════════════════════════════════════════════════════════
+// LONG POSITION ALERTS
+// ═══════════════════════════════════════════════════════════════
+
+// Helper variables for candle types
+bullishCandle = close > open
+bearishCandle = close < open
+
+// Long Entry Signals
+// 1. 양봉 캔들이 가운데 중앙선을 터치 → 매수 준비 신호
+longPrepSignal = bullishCandle and low <= middleLine and high >= middleLine
+
+// 2. 양봉 캔들이 가운데 중앙선을 돌파 마감 → 매수 신호  
+longEntrySignal = bullishCandle and close > middleLine and (close[1] <= middleLine or open <= middleLine)
+
+// Long Exit Signals
+// 3. 음봉 캔들이 상단 초록 영역의 하단선을 터치한 순간 → 매도 준비 신호
+longExitPrepSignal = bearishCandle and low <= constrainedUpperInner and high >= constrainedUpperInner
+
+// 4. 음봉 캔들이 상단 초록 영역을 돌파 마감 → 매도 신호
+longExitSignal = bearishCandle and close > constrainedUpperInner and (close[1] <= constrainedUpperInner or open <= constrainedUpperInner)
+
+// Long Position Alert Conditions
+alertcondition(longPrepSignal, title="🟡 Long Prep Signal", message="양봉이 중앙선을 터치 - 매수 준비하세요!")
+alertcondition(longEntrySignal, title="🟢 Long Entry Signal", message="양봉이 중앙선 돌파 마감 - 매수 신호!")
+alertcondition(longExitPrepSignal, title="🟠 Long Exit Prep Signal", message="음봉이 상단 내부선을 터치 - 매도 준비하세요!")
+alertcondition(longExitSignal, title="🔴 Long Exit Signal", message="음봉이 상단 내부선 돌파 마감 - 매도 신호!")
+
+// Additional traditional alerts (optional)
+upperOuterCross = ta.crossover(close, upperOuter)
+lowerOuterCross = ta.crossunder(close, lowerOuter)
+middleCrossUp = ta.crossover(close, middleLine)
+middleCrossDown = ta.crossunder(close, middleLine)
+
+alertcondition(upperOuterCross, title="Price Above Upper Outer Band", message="Price has crossed above the upper outer band")
+alertcondition(lowerOuterCross, title="Price Below Lower Outer Band", message="Price has crossed below the lower outer band")
+alertcondition(middleCrossUp, title="Price Above Middle Line", message="Price has crossed above the middle line")
+alertcondition(middleCrossDown, title="Price Below Middle Line", message="Price has crossed below the middle line")
