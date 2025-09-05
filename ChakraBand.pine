@@ -94,6 +94,14 @@ fill(plotUpperInner, plotMiddle, color=color.new(i_upperInnerColor, i_upperInner
 fill(plotLowerInner, plotMiddle, color=color.new(i_lowerInnerColor, i_lowerInnerOpacity), title="Lower Inner Zone", editable=false)
 fill(plotLowerOuter, plotLowerInner, color=color.new(i_lowerOuterColor, i_lowerOuterOpacity), title="Lower Outer Zone", editable=false)
 
+// Plot band width percentage in a separate pane
+bandWidthPercent = (upperOuter - lowerOuter) / middleLine * 100
+plot(bandWidthPercent,
+     title   = "Chakra Band Width %",
+     color   = color.new(color.purple, 0),
+     linewidth = 2,
+     display = display.pane)
+
 // ═══════════════════════════════════════════════════════════════
 // LONG POSITION ALERTS
 // ═══════════════════════════════════════════════════════════════
