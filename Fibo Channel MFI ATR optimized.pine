@@ -1,0 +1,173 @@
+//@version=6
+indicator("Fibo Channel MFI + ATR (optimized)", overlay=true, max_lines_count=200, max_labels_count=200)
+
+// ───────── 입력
+logLen         = input.int(100, "LogReg Lookback")
+channelWidth   = input.float(3.0, "Log Channel Width", step=0.1)
+channelLen     = input.int(200, "Log Channel Length")
+mfiLen         = input.int(14, "MFI Length")
+atrLen         = input.int(14, "ATR Length")
+anchorLookback = input.int(250, "Anchor Lookback (for MFI/ATR highs/lows)")
+
+colUp = input.color(#21dfac, "Up Color")
+colDn = input.color(#df21dd, "Down Color")
+labelOffset = input.int(3, "Fibo Label X Offset", minval=-50)
+
+fill0382Color = input.color(color.new(#20C997, 70), "Fill 0.382-0.5 (Teal)",  group="Style")
+fill0618Color = input.color(color.new(#FFD438, 70), "Fill 0.5-0.618 (Yellow)", group="Style")
+
+// ───────── 유틸
+// Built-in covariance/variance is faster than manual loops
+f_log_regression(src, len) =>
+    float x = float(bar_index)
+    float logSrc = math.log(src)
+    float slope = ta.covariance(x, logSrc, len) / ta.variance(x, len)
+    float avgY = ta.sma(logSrc, len)
+    float avgX = ta.sma(x, len)
+    float logIntercept = avgY - slope * avgX
+    [slope, logIntercept]
+
+f_reg_points(len) =>
+    [slope, b] = f_log_regression(close, len)
+    int x2 = bar_index, x1 = bar_index - (len - 1)
+    float y1 = math.exp(b + slope * 1.0)
+    float y2 = math.exp(b + slope * len)
+    [x1, y1, x2, y2, slope]
+
+f_level_xy(x1, c1, x2, c2, w, L) =>
+    float logC1 = math.log(c1), logC2 = math.log(c2)
+    float logB1 = logC1 - w,    logT1 = logC1 + w
+    float logB2 = logC2 - w,    logT2 = logC2 + w
+    float y1 = math.exp(logB1 + (logT1 - logB1) * L)
+    float y2 = math.exp(logB2 + (logT2 - logB2) * L)
+    [x1, y1, x2, y2]
+
+f_make_line(L, x1, c1, x2, c2, w, col) =>
+    [ax1, ay1, ax2, ay2] = f_level_xy(x1, c1, x2, c2, w, L)
+    line.new(ax1, ay1, ax2, ay2, extend=extend.right, color=col, width=2)
+
+f_price_at_line(x1, c1, x2, c2, w, L) =>
+    [_, _, __, y2] = f_level_xy(x1, c1, x2, c2, w, L)
+    y2
+
+// ───────── 객체 핸들
+var line     l0 = na 
+var line     l0236 = na 
+var line     l0382 = na 
+var line     l05 = na 
+var line     l0618 = na 
+var line     l0786 = na 
+var line     l1 = na
+
+var linefill lf0382 = na 
+var linefill lf0618 = na
+
+var label    lab0 = na 
+var label lab0236 = na 
+var label lab0382 = na 
+var label lab05 = na 
+var label lab0618 = na 
+var label lab0786 = na 
+var label lab1 = na
+
+// ───────── 메인(마지막 바에서만 갱신)
+if barstate.islast
+    // 1) 회귀 중심선
+    int regLen = math.max(2, math.min(channelLen, bar_index + 1))
+    [x1, c1, x2, c2, slope] = f_reg_points(regLen)
+    color dirCol = slope >= 0 ? colUp : colDn
+
+    // 2) 앵커 계산(MFI/ATR)
+    float srcHlc3 = hlc3
+    mfi = ta.mfi(srcHlc3, mfiLen)
+    atr = ta.atr(atrLen)
+
+    int look = math.min(anchorLookback, bar_index + 1)
+    int hb_mfi = ta.highestbars(mfi, look), lb_mfi = ta.lowestbars(mfi, look)
+    int hb_atr = ta.highestbars(atr, look), lb_atr = ta.lowestbars(atr, look)
+
+    float topByMfi = close[math.max(hb_mfi, 0)]
+    float botByMfi = close[math.max(lb_mfi, 0)]
+    float topByAtr = close[math.max(hb_atr, 0)]
+    float botByAtr = close[math.max(lb_atr, 0)]
+
+    float anchorTop = na(topByMfi) or na(topByAtr) ? high : (topByMfi + topByAtr) / 2.0
+    float anchorBot = na(botByMfi) or na(botByAtr) ? low  : (botByMfi + botByAtr) / 2.0
+
+    // 상<하인 경우 뒤집기 + 최소폭 보장
+    if anchorTop < anchorBot
+        float tmp = anchorTop
+        anchorTop := anchorBot
+        anchorBot := tmp
+
+    float diffLog = math.log(math.max(anchorTop, 1e-8)) - math.log(math.max(anchorBot, 1e-8))
+    float rawW    = diffLog > 0 ? diffLog / 2.0 : 0.01
+    float w       = math.max(1e-4, rawW * channelWidth)
+
+    // 3) 이전 객체 정리(na 가드)
+    if not na(l0)
+        line.delete(l0)
+    if not na(l0236)
+        line.delete(l0236)
+    if not na(l0382)
+        line.delete(l0382)
+    if not na(l05)
+        line.delete(l05)
+    if not na(l0618)
+        line.delete(l0618)
+    if not na(l0786)
+        line.delete(l0786)
+    if not na(l1)
+        line.delete(l1)
+    if not na(lf0382)
+        linefill.delete(lf0382)
+    if not na(lf0618)
+        linefill.delete(lf0618)
+    if not na(lab0)
+        label.delete(lab0)
+    if not na(lab0236)
+        label.delete(lab0236)
+    if not na(lab0382)
+        label.delete(lab0382)
+    if not na(lab05)
+        label.delete(lab05)
+    if not na(lab0618)
+        label.delete(lab0618)
+    if not na(lab0786)
+        label.delete(lab0786)
+    if not na(lab1)
+        label.delete(lab1)
+
+    // 4) 피보 라인 생성
+    l0     := f_make_line(0.0,   x1, c1, x2, c2, w, color.new(dirCol, 10))
+    l0236  := f_make_line(0.236, x1, c1, x2, c2, w, color.new(dirCol, 0))
+    l0382  := f_make_line(0.382, x1, c1, x2, c2, w, color.new(dirCol, 0))
+    l05    := f_make_line(0.5,   x1, c1, x2, c2, w, color.new(dirCol, 0))
+    l0618  := f_make_line(0.618, x1, c1, x2, c2, w, color.new(dirCol, 0))
+    l0786  := f_make_line(0.786, x1, c1, x2, c2, w, color.new(dirCol, 0))
+    l1     := f_make_line(1.0,   x1, c1, x2, c2, w, color.new(dirCol, 10))
+
+    // 5) 채움
+    lf0382 := linefill.new(l0382, l05,   color=fill0382Color)
+    lf0618 := linefill.new(l05,   l0618, color=fill0618Color)
+
+    // 6) 라벨
+    int lx = bar_index + labelOffset
+    lab0    := label.new(lx, f_price_at_line(x1, c1, x2, c2, w, 0.0),   "0%",    style=label.style_label_right, textcolor=color.white, color=color.new(dirCol, 85))
+    lab0236 := label.new(lx, f_price_at_line(x1, c1, x2, c2, w, 0.236), "23.6%", style=label.style_label_right, textcolor=color.white, color=color.new(dirCol, 85))
+    lab0382 := label.new(lx, f_price_at_line(x1, c1, x2, c2, w, 0.382), "38.2%", style=label.style_label_right, textcolor=color.white, color=color.new(dirCol, 85))
+    lab05   := label.new(lx, f_price_at_line(x1, c1, x2, c2, w, 0.5),   "50%",   style=label.style_label_right, textcolor=color.white, color=color.new(dirCol, 85))
+    lab0618 := label.new(lx, f_price_at_line(x1, c1, x2, c2, w, 0.618), "61.8%", style=label.style_label_right, textcolor=color.white, color=color.new(dirCol, 85))
+    lab0786 := label.new(lx, f_price_at_line(x1, c1, x2, c2, w, 0.786), "78.6%", style=label.style_label_right, textcolor=color.white, color=color.new(dirCol, 85))
+    lab1    := label.new(lx, f_price_at_line(x1, c1, x2, c2, w, 1.0),   "100%",  style=label.style_label_right, textcolor=color.white, color=color.new(dirCol, 85))
+
+// 외부 호출용 (라인 핸들 제공)
+f_get_fib_line_for(level) =>
+    line out = na
+    if   level == 0.382
+        out := l0382
+    else if level == 0.5
+        out := l05
+    else if level == 0.618
+        out := l0618
+    out
