@@ -10,6 +10,7 @@ widthMult     = input.float(3.0, "Log Width Multiplier", step=0.1)
 showMid       = input.bool(true, "Show Mid (50%)")
 rightSpan     = input.int(50, "Right Span (% of regLen)", minval=0, maxval=200, tooltip="우측으로 그릴 길이: regLen의 %")
 labelPadBars  = input.int(1, "Label Left Padding (bars)", minval=0)
+showRightFib  = input.bool(true, "Show right Fibonacci price levels")
 colUp = input.color(#21dfac, "Up Color")
 colDn = input.color(#df21dd, "Down Color")
 
@@ -94,6 +95,11 @@ var label lab0618 = na
 var label lab0786 = na
 var label lab1 = na
 
+var line[] rightFibLines = array.new_line()
+var label[] rightFibLabels = array.new_label()
+var float[] fibLevels = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+var string[] fibTexts = array.from("0%", "23.6%", "38.2%", "50%", "61.8%", "78.6%", "100%")
+
 // ── Main
 bool ready = bar_index >= regLen - 1
 if ready
@@ -160,6 +166,39 @@ if ready
         label.set_x(lab0618, xLbl), label.set_y(lab0618, f_right_y(x1, c1, xRight, cRight, w, 0.618))
         label.set_x(lab0786, xLbl), label.set_y(lab0786, f_right_y(x1, c1, xRight, cRight, w, 0.786))
         label.set_x(lab1,    xLbl), label.set_y(lab1,    f_right_y(x1, c1, xRight, cRight, w, 1.0))
+
+    int fibOff = 5
+    if showRightFib
+        for i = 0 to array.size(fibLevels) - 1
+            float lvl = array.get(fibLevels, i)
+            float price = f_right_y(x1, c1, xRight, cRight, w, lvl)
+            line ln
+            label lb
+            if array.size(rightFibLines) <= i
+                ln := line.new(xRight, price, xRight + fibOff, price, extend=extend.none, color=color.new(dirCol, 0))
+                array.push(rightFibLines, ln)
+                string txt = array.get(fibTexts, i) + " " + str.tostring(price, format.mintick)
+                lb := label.new(xRight + fibOff, price, txt, style=label.style_label_left, textcolor=color.white, color=labBg)
+                array.push(rightFibLabels, lb)
+            else
+                ln := array.get(rightFibLines, i)
+                lb := array.get(rightFibLabels, i)
+                line.set_xy1(ln, xRight, price)
+                line.set_xy2(ln, xRight + fibOff, price)
+                line.set_color(ln, color.new(dirCol, 0))
+                string txt = array.get(fibTexts, i) + " " + str.tostring(price, format.mintick)
+                label.set_x(lb, xRight + fibOff)
+                label.set_y(lb, price)
+                label.set_text(lb, txt)
+                label.set_color(lb, labBg)
+                label.set_textcolor(lb, color.white)
+    else
+        for i = 0 to array.size(rightFibLines) - 1
+            line.delete(array.get(rightFibLines, i))
+        array.clear(rightFibLines)
+        for i = 0 to array.size(rightFibLabels) - 1
+            label.delete(array.get(rightFibLabels, i))
+        array.clear(rightFibLabels)
 
 // 라인 핸들 getter (옵션)
 f_get_fib_line_for(level) =>
