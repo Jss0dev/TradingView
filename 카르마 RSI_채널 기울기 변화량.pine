@@ -1,0 +1,33 @@
+//@version=6
+indicator("카르마 RSI 채널 기울기 변화량", overlay=false, max_bars_back=500)
+
+// 채널 설정 입력값
+int channelLength = input.int(120, "채널 길이", minval=2, maxval=500)
+float channelWidth = input.float(1.5, "채널 폭", step=0.1, minval=0.1)
+
+// 로그 회귀 함수 (가격의 로그에 대해 회귀 후, 지수로 복원)
+f_log_regression(src, len) =>
+    float ln  = math.log(math.max(src, 1e-10))
+    float y0  = ta.linreg(ln, len, 0)
+    float y1  = ta.linreg(ln, len, 1)
+    float a   = y0 - y1
+    float b   = y0 - a * (len - 1)
+    float s   = -a
+    float c   = a * len + b
+    [s, c]
+
+// 충분한 바 보유 여부
+bool bar_ready = bar_index >= channelLength - 1
+
+float channelPercentChange = na
+if bar_ready
+    [slope, intercept] = f_log_regression(close, channelLength)
+    float reg_start = math.exp(intercept + slope * channelLength)
+    float reg_end   = math.exp(intercept + slope * 1.0)
+    channelPercentChange := (reg_end - reg_start) / reg_start * 100
+
+// 채널 기울기 변화량 계산
+float slopeChange = bar_ready ? ta.change(channelPercentChange) : na
+
+hline(0, "0", color=color.gray)
+plot(slopeChange, title="채널 기울기 변화량", color=color.new(color.blue, 0))
