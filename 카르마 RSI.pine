@@ -67,19 +67,6 @@ color colHidBear = color.new(color.orange, 0)
 // ═══════════════════════════════════════════════════════════════
 // [유틸 함수] UTILS
 // ═══════════════════════════════════════════════════════════════
-// 로그 회귀 (가격 로그에 대해 회귀 후 지수로 복원)
-f_log_regression(src, len) =>
-    float sumX = 0.0, sumY = 0.0, sumXSqr = 0.0, sumXY = 0.0
-    for i = 0 to len - 1
-        float per = i + 1.0
-        float val = math.log(src[i])
-        sumX   += per
-        sumY   += val
-        sumXSqr += per * per
-        sumXY  += val * per
-    float slope = (len * sumXY - sumX * sumY) / (len * sumXSqr - sumX * sumX)
-    float intercept = (sumY - slope * sumX) / len
-    [slope, intercept]
 
 // 최근 cond가 true였던 시점이 허용 범위 안인지 검사
 f_inRange(cond, lo, hi) =>
@@ -103,16 +90,15 @@ float lower_end   = na
 float channelPercentChange = na
 
 if bar_ready
-    [slope, intercept] = f_log_regression(close, channelLength)
-    reg_start   := math.exp(intercept + slope * channelLength)
-    reg_end     := math.exp(intercept + slope * 1.0)
+    [_, slope, intercept] = ta.linreg(math.log(close), channelLength)
+    reg_start   := math.exp(intercept)
+    reg_end     := math.exp(intercept + slope * (channelLength - 1))
     dev         := ta.stdev(close, channelLength)
     upper_start := reg_start + dev * channelWidth
     upper_end   := reg_end   + dev * channelWidth
     lower_start := reg_start - dev * channelWidth
     lower_end   := reg_end   - dev * channelWidth
-    // slope returned by f_log_regression is log(past/current)
-    // compute percentage price change over the channel
+    // slope is per-bar change in log space; convert to percentage price change over the channel
     channelPercentChange := (reg_end - reg_start) / reg_start * 100
 
 // 라인/필 핸들
