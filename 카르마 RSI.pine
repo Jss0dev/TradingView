@@ -4,17 +4,17 @@ indicator("카르마RSI", overlay=true, max_bars_back=500)
 // ═══════════════════════════════════════════════════════════════
 // [계산 입력값] CALC INPUTS
 // ═══════════════════════════════════════════════════════════════
-// CHANNEL
-groupCHANNEL = "CHANNEL"
-int   length        = input.int(120, "채널 길이", minval=2, group=groupCHANNEL)
-float channel_width = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=groupCHANNEL)
-bool  mid_disp      = input.bool(true, "50선", inline="mid", group=groupCHANNEL)
 
-// RSI
-groupRSI = "RSI"
-int   length_rsi      = input.int(14, "길이", inline="rsi", group=groupRSI)
-int   upper_threshold = input.int(70, "상단 기준선 (%)", minval=50, maxval=100, step=1, inline="th", group=groupRSI)
-int   length_sig      = input.int(14, "", inline="sig", group=groupRSI)
+// 채널 설정
+channelSettings = "Channel 설정"
+int   channelLength        = input.int(120, "채널 길이", minval=2, group=channelSettings)
+float channelWidth = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=channelSettings)
+// RSI 설정
+rsiSettings = "RSI 설정"
+int   rsiLength         = input.int(14, "RSI 선 길이", group=rsiSettings)
+int   signalLineLength  = input.int(14, "시그널 선 길이", group=rsiSettings)
+
+
 
 // DIVERGENCE
 groupDIV = "DIVERGENCE"
@@ -27,18 +27,36 @@ int  rgUpper    = input.int(60, "범위 상한", minval=2, group=groupDIV, inlin
 // ═══════════════════════════════════════════════════════════════
 // [스타일 입력값] STYLE INPUTS
 // ═══════════════════════════════════════════════════════════════
+
 // CHANNEL
-bool  fill_band     = input.bool(true, "백그라운드", inline="mid", group=groupCHANNEL)
-color col_up        = input.color(#a7abb9, "라인 색상: 상단", group=groupCHANNEL, inline="Col")
-color col_mid       = input.color(color.gray, "중앙", group=groupCHANNEL, inline="Col")
-color col_low       = input.color(#a7abb9, "하단", group=groupCHANNEL, inline="Col")
+channelStyle = "Cnannel 스타일"
+bool  showOverBoughtLine   = input.bool(true, "과매수 라인", inline="과매수 라인", group=channelStyle)
+color overBoughtLineColor  = input.color(#a7abb9, "", group=channelStyle, inline="과매수 라인")
+
+bool  showMidLine      = input.bool(true, "중앙선", inline="중앙선", group=channelStyle)
+color midLineColor     = input.color(color.gray, "", inline="중앙선", group=channelStyle)
+
+bool  showOverBought     = input.bool(true, "과매도 라인", inline = "과매도 라인", group=channelStyle)
+color overBoughtColor    = input.color(color.gray, "", group=channelStyle, inline = "과매도 라인")
+
+bool  fillChannelBand  = input.bool(true, "백그라운드", inline="백그라운드", group=channelStyle)
+color channelBandColor = input.color(color.olive, "", inline = "백그라운드", group=channelStyle)
 
 // RSI
-color osc_col_base           = input.color(color.rgb(161, 0, 182), "", inline="rsi", group=groupRSI)
-int   rsi_transp             = input.int(30, "RSI 선 투명도 (0~100)", minval=0, maxval=100, group=groupRSI)
-bool  show_threshold_labels  = input.bool(true, "기준선 라벨", inline="th", group=groupRSI)
-bool  sig_disp               = input.bool(true, "Signal", inline="sig", group=groupRSI)
-color sig_line               = input.color(color.rgb(255, 0, 0), "", inline="sig", group=groupRSI)
+rsiStyle = "RSI 스타일"
+bool showRsiLine        = input.bool(true, "RSI 선", inline = "RSI 선", group=rsiStyle)
+color rsiLineColor      = input.color(color.purple, "", inline = "RSI 선", group=rsiStyle)
+int rsiLineWidth        = input.int(3, "", minval=1, maxval=5, inline="RSI 선",group=rsiStyle)
+
+
+bool  showSignalLine    = input.bool(true, "시그널 선", inline = "시그널 선", group=rsiStyle)
+color signalLineColor   = input.color(color.rgb(255, 0, 0), "", inline = "시그널 선", group=rsiStyle)
+int signalLineWidth     = input.int(2, "", minval=1, maxval=5, inline="시그널 선",group=rsiStyle)
+
+labelStyle = "라벨 설정"
+bool  showRsiThresholdLabels = input.bool(true, "RSI 라벨 표시", group=labelStyle)
+bool  showRsiUpperThresholdLabels = showRsiThresholdLabels and showOverBoughtLine
+bool  showRsiLowerThresholdLabels = showRsiThresholdLabels and showOverBought
 
 // DIVERGENCE (색상)
 color colRegBull = color.new(color.green,  0)
@@ -71,7 +89,7 @@ f_inRange(cond, lo, hi) =>
 // ═══════════════════════════════════════════════════════════════
 // [채널 계산] REGRESSION CHANNEL
 // ═══════════════════════════════════════════════════════════════
-bool  bar_ready   = bar_index >= length
+bool  bar_ready   = bar_index >= channelLength
 
 float slope       = na
 float intercept   = na
@@ -85,14 +103,14 @@ float lower_end   = na
 float channelPercentChange = na
 
 if bar_ready
-    [slope, intercept] = f_log_regression(close, length)
-    reg_start   := math.exp(intercept + slope * length)
+    [slope, intercept] = f_log_regression(close, channelLength)
+    reg_start   := math.exp(intercept + slope * channelLength)
     reg_end     := math.exp(intercept + slope * 1.0)
-    dev         := ta.stdev(close, length)
-    upper_start := reg_start + dev * channel_width
-    upper_end   := reg_end   + dev * channel_width
-    lower_start := reg_start - dev * channel_width
-    lower_end   := reg_end   - dev * channel_width
+    dev         := ta.stdev(close, channelLength)
+    upper_start := reg_start + dev * channelWidth
+    upper_end   := reg_end   + dev * channelWidth
+    lower_start := reg_start - dev * channelWidth
+    lower_end   := reg_end   - dev * channelWidth
     // slope returned by f_log_regression is log(past/current)
     // compute percentage price change over the channel
     channelPercentChange := (reg_end - reg_start) / reg_start * 100
@@ -107,14 +125,14 @@ var label    lblSlope   = na
 // 채널 라인/필 업데이트
 if bar_ready and not na(dev)
     // 중앙선
-    if mid_disp
+    if showMidLine
         if na(mid_line)
-            mid_line := line.new(bar_index[length], reg_start, bar_index, reg_end,
-                                 xloc=xloc.bar_index, color=col_mid, style=line.style_dashed)
+            mid_line := line.new(bar_index[channelLength], reg_start, bar_index, reg_end,
+                                 xloc=xloc.bar_index, color=midLineColor, style=line.style_dashed)
         else
-            line.set_xy1(mid_line, bar_index[length], reg_start)
+            line.set_xy1(mid_line, bar_index[channelLength], reg_start)
             line.set_xy2(mid_line, bar_index,       reg_end)
-            line.set_color(mid_line, col_mid)
+            line.set_color(mid_line, midLineColor)
     else
         if not na(mid_line)
             line.delete(mid_line)
@@ -122,23 +140,23 @@ if bar_ready and not na(dev)
 
     // 상/하단
     if na(upper_line)
-        upper_line := line.new(bar_index[length], upper_start, bar_index, upper_end,
-                               xloc=xloc.bar_index, color=col_up, width=2)
+        upper_line := line.new(bar_index[channelLength], upper_start, bar_index, upper_end,
+                               xloc=xloc.bar_index, color=overBoughtLineColor, width=2)
     else
-        line.set_xy1(upper_line, bar_index[length], upper_start)
+        line.set_xy1(upper_line, bar_index[channelLength], upper_start)
         line.set_xy2(upper_line, bar_index,         upper_end)
-        line.set_color(upper_line, col_up)
+        line.set_color(upper_line, overBoughtLineColor)
 
     if na(lower_line)
-        lower_line := line.new(bar_index[length], lower_start, bar_index, lower_end,
-                               xloc=xloc.bar_index, color=col_low, width=2)
+        lower_line := line.new(bar_index[channelLength], lower_start, bar_index, lower_end,
+                               xloc=xloc.bar_index, color=overBoughtColor, width=2)
     else
-        line.set_xy1(lower_line, bar_index[length], lower_start)
+        line.set_xy1(lower_line, bar_index[channelLength], lower_start)
         line.set_xy2(lower_line, bar_index,         lower_end)
-        line.set_color(lower_line, col_low)
+        line.set_color(lower_line, overBoughtColor)
 
     // 슬로프 라벨
-    int    centerX   = bar_index - length / 2
+    int    centerX   = bar_index - channelLength / 2
     float  centerY   = (upper_start + upper_end) / 2 + dev * 0.1
     string slopeText = str.format("{0,number,0.##}%", channelPercentChange)
     if na(lblSlope)
@@ -148,9 +166,9 @@ if bar_ready and not na(dev)
         label.set_text(lblSlope, slopeText)
 
     // 채움
-    if fill_band
+    if fillChannelBand
         if na(ch_fill) and not na(upper_line) and not na(lower_line)
-            ch_fill := linefill.new(upper_line, lower_line, color.new(osc_col_base, 95))
+            ch_fill := linefill.new(upper_line, lower_line, channelBandColor)
     else
         if not na(ch_fill)
             linefill.delete(ch_fill)
@@ -172,24 +190,24 @@ if not bar_ready or na(dev)
 // ═══════════════════════════════════════════════════════════════
 // [RSI & 시그널] RSI / SIGNAL
 // ═══════════════════════════════════════════════════════════════
-float rsi = ta.rsi(close, length_rsi)
-float sig = ta.sma(rsi,  length_sig)
-int   lower_threshold = 100 - upper_threshold
+float rsi = ta.rsi(close, rsiLength)
+float sig = ta.sma(rsi,  signalLineLength)
 
-color osc_col = color.new(osc_col_base, rsi_transp)
+int   rsiUpper = 70
+int   rsiLower = 30
 
 // 채널 축 ↔ RSI 매핑 준비
 float lower_slope = na
 float step        = na
 if bar_ready and not na(dev)
-    lower_slope := (lower_start - lower_end) / (length - 1)
-    step        := (upper_end   - lower_end) / (upper_threshold - lower_threshold)
+    lower_slope := (lower_start - lower_end) / (channelLength - 1)
+    step        := (upper_end   - lower_end) / (rsiUpper - rsiLower)
 
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
 f_map_to_price_at(idx, r) =>
     float base = lower_end + lower_slope * idx
-    base + step * (r - lower_threshold)
+    base + step * (r - rsiLower)
 
 // 폴리라인 핸들/라벨
 var polyline pl_rsi = na
@@ -216,26 +234,28 @@ if barstate.islast and bar_ready and not na(dev)
 
     // RSI 폴리라인
     array.clear(points_rsi)
-    for i = 0 to length - 1
+    for i = 0 to channelLength - 1
         float y = f_map_to_price_at(i, rsi[i])
         array.push(points_rsi, chart.point.from_index(bar_index[i], y))
-    pl_rsi := polyline.new(points_rsi, line_color=osc_col, closed=false, force_overlay=true, line_width=4)
+    if showRsiLine
+        pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
 
     // 시그널 폴리라인
-    if sig_disp
+    if showSignalLine
         array.clear(points_sig)
-        for i = 0 to length - 1
+        for i = 0 to channelLength - 1
             float yS = f_map_to_price_at(i, sig[i])
             array.push(points_sig, chart.point.from_index(bar_index[i], yS))
-        pl_sig := polyline.new(points_sig, line_color=sig_line, closed=false, force_overlay=true, line_width=2)
+        pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
 
     // 라벨
     float y_now = f_map_to_price_at(0, rsi)
     lbl_rsi := label.new(bar_index, y_now, "카르마 RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
 
-    if show_threshold_labels
-        lbl_lo := label.new(bar_index, lower_end, str.tostring(lower_threshold, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
-        lbl_hi := label.new(bar_index, upper_end, str.tostring(upper_threshold, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    if showRsiUpperThresholdLabels
+        lbl_hi := label.new(bar_index, upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    if showRsiLowerThresholdLabels
+        lbl_lo := label.new(bar_index, lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
 
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 계산] DIVERGENCE CALC (Regular + Hidden)
