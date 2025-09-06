@@ -1,5 +1,6 @@
 //@version=6
-indicator("카르마 RSI 채널 기울기 변화량", overlay=false, max_bars_back=500)
+indicator("카르마 RSI 채널 기울기 변화량", overlay=false, max_bars_back=500,
+          format=format.percent, precision=2)
 
 // 채널 설정 입력값
 int channelLength = input.int(120, "채널 길이", minval=2, maxval=500)
@@ -30,4 +31,5 @@ if bar_ready
 float slopeChange = bar_ready ? ta.change(channelPercentChange) : na
 
 hline(0, "0", color=color.gray)
-plot(slopeChange, title="채널 기울기 변화량", color=color.new(color.blue, 0))
+plot(slopeChange, title="채널 기울기 변화량",
+     color=color.new(color.blue, 0), format=format.percent)
