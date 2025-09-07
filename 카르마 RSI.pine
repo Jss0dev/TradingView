@@ -98,6 +98,7 @@ f_inRange(cond, lo, hi) =>
 // ═══════════════════════════════════════════════════════════════
 bool  bar_ready   = bar_index >= channelLength - 1
 
+float ln_close    = math.log(math.max(close, 1e-10))
 float slope       = na
 float intercept   = na
 float reg_start   = na
@@ -113,7 +114,7 @@ if bar_ready
     [slope, intercept] = f_log_regression(close, channelLength)
     reg_start   := math.exp(intercept + slope * channelLength)
     reg_end     := math.exp(intercept + slope * 1.0)
-    dev         := useLogChannel ? ta.stdev(math.log(close), channelLength) : ta.stdev(close, channelLength)
+    dev         := useLogChannel ? ta.stdev(ln_close, channelLength) : ta.stdev(close, channelLength)
     if useLogChannel
         upper_start := reg_start * math.exp(dev * channelWidth)
         upper_end   := reg_end   * math.exp(dev * channelWidth)
