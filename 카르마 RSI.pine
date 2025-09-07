@@ -9,7 +9,6 @@ indicator("카르마RSI", overlay=true, max_bars_back=500)
 channelSettings = "Channel 설정"
 int   channelLength        = input.int(120, "채널 길이", minval=2, maxval=500,group=channelSettings)
 float channelWidth = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=channelSettings)
-bool  useLogChannel = input.bool(false, "로그 채널 폭", group=channelSettings, tooltip="이 방식은 언제나 채널이 평행함을 보장합니다.")
 // RSI 설정
 rsiSettings = "RSI 설정"
 int   rsiLength         = input.int(14, "RSI 선 길이", minval=0, group=rsiSettings)
@@ -98,7 +97,6 @@ f_inRange(cond, lo, hi) =>
 // ═══════════════════════════════════════════════════════════════
 bool  bar_ready   = bar_index >= channelLength - 1
 
-float ln_close    = math.log(math.max(close, 1e-10))
 float slope       = na
 float intercept   = na
 float reg_start   = na
@@ -109,24 +107,16 @@ float upper_end   = na
 float lower_start = na
 float lower_end   = na
 float channelPercentChange = na
-float k = na
 
 if bar_ready
     [slope, intercept] = f_log_regression(close, channelLength)
     reg_start   := math.exp(intercept + slope * channelLength)
     reg_end     := math.exp(intercept + slope * 1.0)
-    dev         := useLogChannel ? ta.stdev(ln_close, channelLength) : ta.stdev(close, channelLength)
-    k           := dev * channelWidth
-    if useLogChannel
-        upper_start := reg_start * math.exp(k)
-        upper_end   := reg_end   * math.exp(k)
-        lower_start := reg_start * math.exp(-k)
-        lower_end   := reg_end   * math.exp(-k)
-    else
-        upper_start := reg_start + k
-        upper_end   := reg_end   + k
-        lower_start := reg_start - k
-        lower_end   := reg_end   - k
+    dev         := ta.stdev(close, channelLength)
+    upper_start := reg_start + dev * channelWidth
+    upper_end   := reg_end   + dev * channelWidth
+    lower_start := reg_start - dev * channelWidth
+    lower_end   := reg_end   - dev * channelWidth
     // slope returned by f_log_regression is log(past/current)
     // compute percentage price change over the channel
     channelPercentChange := (reg_end - reg_start) / reg_start * 100
@@ -198,31 +188,11 @@ if bar_ready and not na(dev)
     lower_slope := (lower_start - lower_end) / (channelLength - 1)
     step        := (upper_end   - lower_end) / (rsiUpper - rsiLower)
 
-// 회귀값 (idx: 0=현재..length-1=과거)
-f_reg_value_at(idx) =>
-    math.exp(intercept + slope * (1.0 + idx))
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
 f_map_to_price_at(idx, r) =>
-    if useLogChannel
-        float reg_i = f_reg_value_at(idx)
-        float fallback = close[idx]
-        if na(reg_i) or na(k)
-            fallback
-        else
-            float lo_i = reg_i * math.exp(-k)
-            float hi_i = reg_i * math.exp(k)
-            if lo_i <= 0 or hi_i <= 0 or hi_i <= lo_i
-                fallback
-            else
-                float t = (r - rsiLower) / (rsiUpper - rsiLower)
-                t := math.max(0.0, math.min(1.0, t))
-                float lo_ln = math.log(lo_i)
-                float hi_ln = math.log(hi_i)
-                math.exp(lo_ln + t * (hi_ln - lo_ln))
-    else
-        float lo_i = lower_end + lower_slope * idx
-        lo_i + step * (r - rsiLower)
+    float base = lower_end + lower_slope * idx
+    base + step * (r - rsiLower)
 
 // 폴리라인 핸들/라벨
 var polyline pl_rsi = na
@@ -249,20 +219,18 @@ if barstate.islast and bar_ready and not na(dev)
 
     // RSI 폴리라인
     array.clear(points_rsi)
-    for i = channelLength - 1 to 0
+    for i = 0 to channelLength - 1
         float y = f_map_to_price_at(i, rsi[i])
-        if not na(y) and y > 0
-            array.push(points_rsi, chart.point.from_index(bar_index[i], y))
+        array.push(points_rsi, chart.point.from_index(bar_index[i], y))
     if showRsiLine
         pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
 
     // 시그널 폴리라인
     if showSignalLine
         array.clear(points_sig)
-        for i = channelLength - 1 to 0
+        for i = 0 to channelLength - 1
             float yS = f_map_to_price_at(i, sig[i])
-            if not na(yS) and yS > 0
-                array.push(points_sig, chart.point.from_index(bar_index[i], yS))
+            array.push(points_sig, chart.point.from_index(bar_index[i], yS))
         pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
 
     // 라벨
@@ -274,7 +242,7 @@ if barstate.islast and bar_ready and not na(dev)
     if showRsiLowerThresholdLabels
         lbl_lo := label.new(bar_index, lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
 
-    string slopeText = "기울기: " + str.format("{0,number,0.##}%", channelPercentChange)
+    string slopeText = "기울기: " + str.format("{0,number,0.###}%", channelPercentChange)
     if na(lblSlope)
         lblSlope := label.new(bar_index, upper_end, slopeText, style = label.style_label_lower_right, textcolor=chart.fg_color, color=color.new(color.black, 100) )
     else
