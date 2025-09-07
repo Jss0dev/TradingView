@@ -206,15 +206,20 @@ f_reg_value_at(idx) =>
 f_map_to_price_at(idx, r) =>
     if useLogChannel
         float reg_i = f_reg_value_at(idx)
-        float lo_i  = math.max(reg_i * math.exp(-k), 1e-10)
-        float hi_i  = math.max(reg_i * math.exp(k), 1e-10)
-        if na(lo_i) or na(hi_i)
-            na
+        float fallback = close[idx]
+        if na(reg_i) or na(k)
+            fallback
         else
-            float t     = (r - rsiLower) / (rsiUpper - rsiLower)
-            float lo_ln = math.log(lo_i)
-            float hi_ln = math.log(hi_i)
-            math.exp(lo_ln + t * (hi_ln - lo_ln))
+            float lo_i = reg_i * math.exp(-k)
+            float hi_i = reg_i * math.exp(k)
+            if lo_i <= 0 or hi_i <= 0 or hi_i <= lo_i
+                fallback
+            else
+                float t = (r - rsiLower) / (rsiUpper - rsiLower)
+                t := math.max(0.0, math.min(1.0, t))
+                float lo_ln = math.log(lo_i)
+                float hi_ln = math.log(hi_i)
+                math.exp(lo_ln + t * (hi_ln - lo_ln))
     else
         float lo_i = lower_end + lower_slope * idx
         lo_i + step * (r - rsiLower)
@@ -246,7 +251,7 @@ if barstate.islast and bar_ready and not na(dev)
     array.clear(points_rsi)
     for i = channelLength - 1 to 0
         float y = f_map_to_price_at(i, rsi[i])
-        if not na(y)
+        if not na(y) and y > 0
             array.push(points_rsi, chart.point.from_index(bar_index[i], y))
     if showRsiLine
         pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
@@ -256,7 +261,7 @@ if barstate.islast and bar_ready and not na(dev)
         array.clear(points_sig)
         for i = channelLength - 1 to 0
             float yS = f_map_to_price_at(i, sig[i])
-            if not na(yS)
+            if not na(yS) and yS > 0
                 array.push(points_sig, chart.point.from_index(bar_index[i], yS))
         pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
 
