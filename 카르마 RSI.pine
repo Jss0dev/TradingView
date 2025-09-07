@@ -206,12 +206,15 @@ f_reg_value_at(idx) =>
 f_map_to_price_at(idx, r) =>
     if useLogChannel
         float reg_i = f_reg_value_at(idx)
-        float lo_i  = reg_i * math.exp(-k)
-        float hi_i  = reg_i * math.exp(k)
-        float t     = (r - rsiLower) / (rsiUpper - rsiLower)
-        float lo_ln = math.log(lo_i)
-        float hi_ln = math.log(hi_i)
-        math.exp(lo_ln + t * (hi_ln - lo_ln))
+        float lo_i  = math.max(reg_i * math.exp(-k), 1e-10)
+        float hi_i  = math.max(reg_i * math.exp(k), 1e-10)
+        if na(lo_i) or na(hi_i)
+            na
+        else
+            float t     = (r - rsiLower) / (rsiUpper - rsiLower)
+            float lo_ln = math.log(lo_i)
+            float hi_ln = math.log(hi_i)
+            math.exp(lo_ln + t * (hi_ln - lo_ln))
     else
         float lo_i = lower_end + lower_slope * idx
         lo_i + step * (r - rsiLower)
@@ -243,7 +246,8 @@ if barstate.islast and bar_ready and not na(dev)
     array.clear(points_rsi)
     for i = channelLength - 1 to 0
         float y = f_map_to_price_at(i, rsi[i])
-        array.push(points_rsi, chart.point.from_index(bar_index[i], y))
+        if not na(y)
+            array.push(points_rsi, chart.point.from_index(bar_index[i], y))
     if showRsiLine
         pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
 
@@ -252,7 +256,8 @@ if barstate.islast and bar_ready and not na(dev)
         array.clear(points_sig)
         for i = channelLength - 1 to 0
             float yS = f_map_to_price_at(i, sig[i])
-            array.push(points_sig, chart.point.from_index(bar_index[i], yS))
+            if not na(yS)
+                array.push(points_sig, chart.point.from_index(bar_index[i], yS))
         pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
 
     // 라벨
