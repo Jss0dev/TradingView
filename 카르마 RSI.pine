@@ -9,12 +9,16 @@ indicator("카르마RSI", overlay=true, max_bars_back=500)
 channelSettings = "Channel 설정"
 int   channelLength        = input.int(120, "채널 길이", minval=2, maxval=500,group=channelSettings)
 float channelWidth = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=channelSettings)
+
+// 밴드 모드(기본=기존 방식 유지)
+groupMODE = "Band Mode"
+string bandMode = input.string("Absolute (linear) — 기존", "모드 선택", options=["Absolute (linear) — 기존", "Percent (log) — 퍼센트"], group=groupMODE)
+bool   isPercent = (bandMode == "Percent (log) — 퍼센트")
+
 // RSI 설정
 rsiSettings = "RSI 설정"
 int   rsiLength         = input.int(14, "RSI 선 길이", minval=0, group=rsiSettings)
 int   signalLineLength  = input.int(14, "시그널 선 길이", minval=0, group=rsiSettings)
-
-
 
 // DIVERGENCE
 groupDIV = "DIVERGENCE"
@@ -44,14 +48,17 @@ color channelBandColor = input.color(color.olive, "", inline = "백그라운드"
 
 // RSI
 rsiStyle = "RSI 스타일"
-bool showRsiLine        = input.bool(true, "RSI 선", inline = "RSI 선", group=rsiStyle)
-color rsiLineColor      = input.color(color.purple, "", inline = "RSI 선", group=rsiStyle)
-int rsiLineWidth        = input.int(3, "", minval=1, maxval=5, inline="RSI 선",group=rsiStyle)
+bool showRsiLine_in        = input.bool(true, "RSI 선", inline = "RSI 선", group=rsiStyle)
+color rsiLineColor         = input.color(color.purple, "", inline = "RSI 선", group=rsiStyle)
+int rsiLineWidth           = input.int(3, "", minval=1, maxval=5, inline="RSI 선",group=rsiStyle)
 
+bool  showSignalLine_in    = input.bool(true, "시그널 선", inline = "시그널 선", group=rsiStyle)
+color signalLineColor      = input.color(color.rgb(255, 0, 0), "", inline = "시그널 선", group=rsiStyle)
+int signalLineWidth        = input.int(2, "", minval=1, maxval=5, inline="시그널 선",group=rsiStyle)
 
-bool  showSignalLine    = input.bool(true, "시그널 선", inline = "시그널 선", group=rsiStyle)
-color signalLineColor   = input.color(color.rgb(255, 0, 0), "", inline = "시그널 선", group=rsiStyle)
-int signalLineWidth     = input.int(2, "", minval=1, maxval=5, inline="시그널 선",group=rsiStyle)
+// 퍼센트 모드에서는 RSI/시그널이 반드시 표시되도록 강제
+bool showRsiLine    = isPercent ? true : showRsiLine_in
+bool showSignalLine = isPercent ? true : showSignalLine_in
 
 labelStyle = "라벨 설정"
 bool  showRsiThresholdLabels = input.bool(true, "RSI 라벨 표시", group=labelStyle)
@@ -70,22 +77,16 @@ color colHidBear = color.new(color.orange, 0)
 f_log_regression(src, len) =>
     // 로그 안전장치
     float ln  = math.log(math.max(src, 1e-10))
-
     // 표준 내부축(x_std = 0..len-1, 현재바 x_std=len-1)에서의 회귀값
     float y0  = ta.linreg(ln, len, 0)  // x_std = len-1 (현재)
     float y1  = ta.linreg(ln, len, 1)  // x_std = len-2 (1바 전)
-
     // 표준축의 계수 y = a*x_std + b
-    float a   = y0 - y1                 // 기울기(로그 스페이스, 바당 변화)
+    float a   = y0 - y1                 // 기울기(로그 스페이스)
     float b   = y0 - a * (len - 1)      // 절편
-
-    // 당신의 per축(현재=1, 과거=len)으로 변환: per = len - x_std
-    // y = s*per + c  가 되도록 s,c 산출
+    // per축(현재=1, 과거=len)으로 변환: y = s*per + c
     float s   = -a
     float c   = a * len + b
-
-    [s, c]    // (slope, intercept) — 호출부의 기존 reg_start/reg_end 식과 호환
-
+    [s, c]    // (slope, intercept in per-axis)
 
 // 최근 cond가 true였던 시점이 허용 범위 안인지 검사
 f_inRange(cond, lo, hi) =>
@@ -108,17 +109,40 @@ float lower_start = na
 float lower_end   = na
 float channelPercentChange = na
 
+// 퍼센트 모드용 보조 변수
+float s_per = na
+float c_per = na
+float mult = na
+float devLog = na
+
 if bar_ready
+    // 공통: 로그 회귀 직선(로그 공간)
     [slope, intercept] = f_log_regression(close, channelLength)
-    reg_start   := math.exp(intercept + slope * channelLength)
-    reg_end     := math.exp(intercept + slope * 1.0)
-    dev         := ta.stdev(close, channelLength)
-    upper_start := reg_start + dev * channelWidth
-    upper_end   := reg_end   + dev * channelWidth
-    lower_start := reg_start - dev * channelWidth
-    lower_end   := reg_end   - dev * channelWidth
-    // slope returned by f_log_regression is log(past/current)
-    // compute percentage price change over the channel
+    // per축: 현재=1, 과거=len
+    reg_start := math.exp(intercept + slope * channelLength)
+    reg_end   := math.exp(intercept + slope * 1.0)
+
+    if isPercent
+        // 로그 편차 기반 퍼센트 밴드
+        float lnClose = math.log(math.max(close, 1e-10))
+        devLog := ta.stdev(lnClose, channelLength)
+        mult   := math.exp(devLog * channelWidth)
+        s_per  := slope
+        c_per  := intercept
+
+        upper_start := reg_start * mult
+        upper_end   := reg_end   * mult
+        lower_start := reg_start / mult
+        lower_end   := reg_end   / mult
+    else
+        // 기존 방식: 선형 가격 편차(== 현행과 완전히 동일)
+        dev         := ta.stdev(close, channelLength)
+        upper_start := reg_start + dev * channelWidth
+        upper_end   := reg_end   + dev * channelWidth
+        lower_start := reg_start - dev * channelWidth
+        lower_end   := reg_end   - dev * channelWidth
+
+    // 채널 % 변화(현행 계산식 유지)
     channelPercentChange := (reg_end - reg_start) / reg_start * 100
 
 // 라인/필 핸들
@@ -129,7 +153,7 @@ var linefill ch_fill    = na
 var label    lblSlope   = na
 
 // 채널 라인/필 업데이트
-if bar_ready and not na(dev)
+if bar_ready and (isPercent ? not na(mult) : not na(dev))
     // 중앙선
     if na(mid_line)
         mid_line := line.new(bar_index[channelLength], reg_start, bar_index, reg_end, xloc=xloc.bar_index, color=showMidLine ? midLineColor : na, style=line.style_dashed)
@@ -160,7 +184,7 @@ if bar_ready and not na(dev)
             ch_fill := na
 
 // 준비 미충족 시 정리
-if not bar_ready or na(dev)
+if not bar_ready or (isPercent ? na(mult) : na(dev))
     if not na(mid_line)
         line.delete(mid_line),  mid_line  := na
     if not na(upper_line)
@@ -181,18 +205,33 @@ float sig = ta.sma(rsi,  signalLineLength)
 int   rsiUpper = 70
 int   rsiLower = 30
 
-// 채널 축 ↔ RSI 매핑 준비
+// 기존(절대) 모드용 매핑 준비: 직선 가정(현행과 동일 유지)
 float lower_slope = na
 float step        = na
-if bar_ready and not na(dev)
+if (not isPercent) and bar_ready and not na(dev)
     lower_slope := (lower_start - lower_end) / (channelLength - 1)
     step        := (upper_end   - lower_end) / (rsiUpper - rsiLower)
 
+// 퍼센트 모드용: 각 i에서 밴드를 직접 계산
+f_reg_at(i) =>
+    // per = 1 + i (0=현재)
+    math.exp(c_per + s_per * (1.0 + i))
+
+f_upper_at(i) =>
+    f_reg_at(i) * mult
+
+f_lower_at(i) =>
+    f_reg_at(i) / mult
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
 f_map_to_price_at(idx, r) =>
-    float base = lower_end + lower_slope * idx
-    base + step * (r - rsiLower)
+    if isPercent
+        float lo = f_lower_at(idx)
+        float hi = f_upper_at(idx)
+        lo + (hi - lo) * (r - rsiLower) / (rsiUpper - rsiLower)
+    else
+        float base = lower_end + lower_slope * idx
+        base + step * (r - rsiLower)
 
 // 폴리라인 핸들/라벨
 var polyline pl_rsi = na
@@ -204,7 +243,7 @@ var array<chart.point> points_rsi = array.new<chart.point>()
 var array<chart.point> points_sig = array.new<chart.point>()
 
 // 마지막 바에서만 폴리라인/라벨 갱신
-if barstate.islast and bar_ready and not na(dev)
+if barstate.islast and bar_ready and (isPercent ? not na(mult) : not na(dev))
     // 정리
     if not na(pl_rsi)
         polyline.delete(pl_rsi), pl_rsi := na
@@ -226,11 +265,11 @@ if barstate.islast and bar_ready and not na(dev)
         pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
 
     // 시그널 폴리라인
+    array.clear(points_sig)
+    for i = 0 to channelLength - 1
+        float yS = f_map_to_price_at(i, sig[i])
+        array.push(points_sig, chart.point.from_index(bar_index[i], yS))
     if showSignalLine
-        array.clear(points_sig)
-        for i = 0 to channelLength - 1
-            float yS = f_map_to_price_at(i, sig[i])
-            array.push(points_sig, chart.point.from_index(bar_index[i], yS))
         pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
 
     // 라벨
@@ -292,11 +331,11 @@ if calc_div
 
 // 다이버전스 마커용 좌표(전역 계산)
 float y_div = na
-if bar_ready and not na(dev)
+if bar_ready and (isPercent ? not na(mult) : not na(dev))
     y_div := f_map_to_price_at(lbRight, rsi[lbRight])
 
 // 플래그(표시 가능 여부)
-bool canPlotDiv = calc_div and bar_ready and not na(dev)
+bool canPlotDiv = calc_div and bar_ready and (isPercent ? not na(mult) : not na(dev))
 
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 표시/알림] (전역에서 호출: local scope 금지)
