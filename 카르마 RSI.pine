@@ -9,6 +9,7 @@ indicator("카르마RSI", overlay=true, max_bars_back=500)
 channelSettings = "Channel 설정"
 int   channelLength        = input.int(120, "채널 길이", minval=2, maxval=500,group=channelSettings)
 float channelWidth = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=channelSettings)
+bool  useLogChannel = input.bool(false, "로그 채널 폭", group=channelSettings, tooltip="이 방식은 언제나 채널이 평행함을 보장합니다.")
 // RSI 설정
 rsiSettings = "RSI 설정"
 int   rsiLength         = input.int(14, "RSI 선 길이", minval=0, group=rsiSettings)
@@ -112,11 +113,17 @@ if bar_ready
     [slope, intercept] = f_log_regression(close, channelLength)
     reg_start   := math.exp(intercept + slope * channelLength)
     reg_end     := math.exp(intercept + slope * 1.0)
-    dev         := ta.stdev(close, channelLength)
-    upper_start := reg_start + dev * channelWidth
-    upper_end   := reg_end   + dev * channelWidth
-    lower_start := reg_start - dev * channelWidth
-    lower_end   := reg_end   - dev * channelWidth
+    dev         := useLogChannel ? ta.stdev(math.log(close), channelLength) : ta.stdev(close, channelLength)
+    if useLogChannel
+        upper_start := reg_start * math.exp(dev * channelWidth)
+        upper_end   := reg_end   * math.exp(dev * channelWidth)
+        lower_start := reg_start * math.exp(-dev * channelWidth)
+        lower_end   := reg_end   * math.exp(-dev * channelWidth)
+    else
+        upper_start := reg_start + dev * channelWidth
+        upper_end   := reg_end   + dev * channelWidth
+        lower_start := reg_start - dev * channelWidth
+        lower_end   := reg_end   - dev * channelWidth
     // slope returned by f_log_regression is log(past/current)
     // compute percentage price change over the channel
     channelPercentChange := (reg_end - reg_start) / reg_start * 100
