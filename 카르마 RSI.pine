@@ -109,22 +109,24 @@ float upper_end   = na
 float lower_start = na
 float lower_end   = na
 float channelPercentChange = na
+float k = na
 
 if bar_ready
     [slope, intercept] = f_log_regression(close, channelLength)
     reg_start   := math.exp(intercept + slope * channelLength)
     reg_end     := math.exp(intercept + slope * 1.0)
     dev         := useLogChannel ? ta.stdev(ln_close, channelLength) : ta.stdev(close, channelLength)
+    k           := dev * channelWidth
     if useLogChannel
-        upper_start := reg_start * math.exp(dev * channelWidth)
-        upper_end   := reg_end   * math.exp(dev * channelWidth)
-        lower_start := reg_start * math.exp(-dev * channelWidth)
-        lower_end   := reg_end   * math.exp(-dev * channelWidth)
+        upper_start := reg_start * math.exp(k)
+        upper_end   := reg_end   * math.exp(k)
+        lower_start := reg_start * math.exp(-k)
+        lower_end   := reg_end   * math.exp(-k)
     else
-        upper_start := reg_start + dev * channelWidth
-        upper_end   := reg_end   + dev * channelWidth
-        lower_start := reg_start - dev * channelWidth
-        lower_end   := reg_end   - dev * channelWidth
+        upper_start := reg_start + k
+        upper_end   := reg_end   + k
+        lower_start := reg_start - k
+        lower_end   := reg_end   - k
     // slope returned by f_log_regression is log(past/current)
     // compute percentage price change over the channel
     channelPercentChange := (reg_end - reg_start) / reg_start * 100
@@ -203,12 +205,16 @@ f_reg_value_at(idx) =>
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
 f_map_to_price_at(idx, r) =>
     if useLogChannel
-        float base_ln = math.log(f_reg_value_at(idx)) - dev * channelWidth
-        float step_ln = (2 * dev * channelWidth) / (rsiUpper - rsiLower)
-        math.exp(base_ln + step_ln * (r - rsiLower))
+        float reg_i = f_reg_value_at(idx)
+        float lo_i  = reg_i * math.exp(-k)
+        float hi_i  = reg_i * math.exp(k)
+        float t     = (r - rsiLower) / (rsiUpper - rsiLower)
+        float lo_ln = math.log(lo_i)
+        float hi_ln = math.log(hi_i)
+        math.exp(lo_ln + t * (hi_ln - lo_ln))
     else
-        float base = lower_end + lower_slope * idx
-        base + step * (r - rsiLower)
+        float lo_i = lower_end + lower_slope * idx
+        lo_i + step * (r - rsiLower)
 
 // 폴리라인 핸들/라벨
 var polyline pl_rsi = na
