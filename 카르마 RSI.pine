@@ -198,7 +198,7 @@ if bar_ready and not na(dev)
 
 // 회귀값 (idx: 0=현재..length-1=과거)
 f_reg_value_at(idx) =>
-    math.exp(intercept + slope * (channelLength - idx))
+    math.exp(intercept + slope * (1.0 + idx))
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
 f_map_to_price_at(idx, r) =>
