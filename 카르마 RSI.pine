@@ -241,7 +241,7 @@ if barstate.islast and bar_ready and not na(dev)
 
     // RSI 폴리라인
     array.clear(points_rsi)
-    for i = 0 to channelLength - 1
+    for i = channelLength - 1 to 0
         float y = f_map_to_price_at(i, rsi[i])
         array.push(points_rsi, chart.point.from_index(bar_index[i], y))
     if showRsiLine
@@ -250,7 +250,7 @@ if barstate.islast and bar_ready and not na(dev)
     // 시그널 폴리라인
     if showSignalLine
         array.clear(points_sig)
-        for i = 0 to channelLength - 1
+        for i = channelLength - 1 to 0
             float yS = f_map_to_price_at(i, sig[i])
             array.push(points_sig, chart.point.from_index(bar_index[i], yS))
         pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
