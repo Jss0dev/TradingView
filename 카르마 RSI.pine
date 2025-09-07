@@ -195,11 +195,19 @@ if bar_ready and not na(dev)
     lower_slope := (lower_start - lower_end) / (channelLength - 1)
     step        := (upper_end   - lower_end) / (rsiUpper - rsiLower)
 
+// 회귀값 (idx: 0=현재..length-1=과거)
+f_reg_value_at(idx) =>
+    math.exp(intercept + slope * (channelLength - idx))
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
 f_map_to_price_at(idx, r) =>
-    float base = lower_end + lower_slope * idx
-    base + step * (r - rsiLower)
+    if useLogChannel
+        float base_ln = math.log(f_reg_value_at(idx)) - dev * channelWidth
+        float step_ln = (2 * dev * channelWidth) / (rsiUpper - rsiLower)
+        math.exp(base_ln + step_ln * (r - rsiLower))
+    else
+        float base = lower_end + lower_slope * idx
+        base + step * (r - rsiLower)
 
 // 폴리라인 핸들/라벨
 var polyline pl_rsi = na
