@@ -154,6 +154,10 @@ var line     lower_line = na
 var linefill ch_fill    = na
 var label    lblSlope   = na
 var array<line> fibLines = array.new<line>()
+var array<label> fibLabels = array.new<label>()
+var label lblFibUpper = na
+var label lblFibMid   = na
+var label lblFibLower = na
 
 // 채널 라인/필 업데이트
 if bar_ready and (isPercent ? not na(mult) : not na(dev))
@@ -179,30 +183,62 @@ if bar_ready and (isPercent ? not na(mult) : not na(dev))
 
     // 피보나치 채널 라인
     if isPercent and showFibChannels
-        float delta_start = upper_start - lower_start
-        float delta_end   = upper_end   - lower_end
-        float[] base = array.from(0.0, 0.236, 0.382, 0.618, 1.0)
         float topRatio = slope >= 0 ? 0.7 : 0.3
         float botRatio = slope >= 0 ? 0.3 : 0.7
-        float extRatio = topRatio + (topRatio - botRatio) * 0.618
-        int baseSize = array.size(base)
-        for i = 0 to baseSize
-            float ratioMapped = i < baseSize ? botRatio + (topRatio - botRatio) * array.get(base, i) : extRatio
-            float y1 = lower_start + delta_start * ratioMapped
-            float y2 = lower_end   + delta_end   * ratioMapped
+        float delta_unit_start = (upper_start - lower_start) / (topRatio - botRatio)
+        float delta_unit_end   = (upper_end   - lower_end)   / (topRatio - botRatio)
+        float[] ratios = array.from(0.0, 0.382, 0.618, 1.0, 1.618)
+        int rCount = array.size(ratios)
+        for i = 0 to rCount - 1
+            float r = array.get(ratios, i)
+            float y1 = lower_start + delta_unit_start * (r - botRatio)
+            float y2 = lower_end   + delta_unit_end   * (r - botRatio)
             line fl = na
+            label lbl = na
             if array.size(fibLines) <= i
                 fl := line.new(bar_index[channelLength], y1, bar_index, y2, xloc=xloc.bar_index, color=midLineColor, style=line.style_dotted)
                 array.push(fibLines, fl)
+                lbl := label.new(bar_index, y2, str.tostring(r, "#.###"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+                array.push(fibLabels, lbl)
             else
                 fl := array.get(fibLines, i)
                 line.set_xy1(fl, bar_index[channelLength], y1)
                 line.set_xy2(fl, bar_index,       y2)
+                lbl := array.get(fibLabels, i)
+                label.set_xy(lbl, bar_index, y2)
+                label.set_text(lbl, str.tostring(r, "#.###"))
+        string txtTop = str.tostring(topRatio, "#.###")
+        string txtBot = str.tostring(botRatio, "#.###")
+        if na(lblFibUpper)
+            lblFibUpper := label.new(bar_index, upper_end, txtTop, style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+        else
+            label.set_xy(lblFibUpper, bar_index, upper_end)
+            label.set_text(lblFibUpper, txtTop)
+        if na(lblFibLower)
+            lblFibLower := label.new(bar_index, lower_end, txtBot, style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+        else
+            label.set_xy(lblFibLower, bar_index, lower_end)
+            label.set_text(lblFibLower, txtBot)
+        if na(lblFibMid)
+            lblFibMid := label.new(bar_index, reg_end, "0.5", style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+        else
+            label.set_xy(lblFibMid, bar_index, reg_end)
+            label.set_text(lblFibMid, "0.5")
     else
         if array.size(fibLines) > 0
             for i = 0 to array.size(fibLines) - 1
                 line.delete(array.get(fibLines, i))
             array.clear(fibLines)
+        if array.size(fibLabels) > 0
+            for i = 0 to array.size(fibLabels) - 1
+                label.delete(array.get(fibLabels, i))
+            array.clear(fibLabels)
+        if not na(lblFibUpper)
+            label.delete(lblFibUpper), lblFibUpper := na
+        if not na(lblFibLower)
+            label.delete(lblFibLower), lblFibLower := na
+        if not na(lblFibMid)
+            label.delete(lblFibMid),   lblFibMid   := na
 
     // 채움
     if fillChannelBand
@@ -229,6 +265,16 @@ if not bar_ready or (isPercent ? na(mult) : na(dev))
         for i = 0 to array.size(fibLines) - 1
             line.delete(array.get(fibLines, i))
         array.clear(fibLines)
+    if array.size(fibLabels) > 0
+        for i = 0 to array.size(fibLabels) - 1
+            label.delete(array.get(fibLabels, i))
+        array.clear(fibLabels)
+    if not na(lblFibUpper)
+        label.delete(lblFibUpper), lblFibUpper := na
+    if not na(lblFibLower)
+        label.delete(lblFibLower), lblFibLower := na
+    if not na(lblFibMid)
+        label.delete(lblFibMid),   lblFibMid   := na
 
 // ═══════════════════════════════════════════════════════════════
 // [RSI & 시그널] RSI / SIGNAL
