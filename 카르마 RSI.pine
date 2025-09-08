@@ -44,7 +44,7 @@ color midLineColor     = input.color(color.gray, "", inline="중앙선", group=c
 bool  showOverSoldLine     = input.bool(true, "과매도 라인", inline = "과매도 라인", group=channelStyle)
 color overSoldLineColor    = input.color(color.gray, "", group=channelStyle, inline = "과매도 라인")
 
-bool  fillChannelBand  = input.bool(true, "백그라운드", inline="백그라운드", group=channelStyle)
+bool  fillChannelBand  = input.bool(false, "백그라운드", inline="백그라운드", group=channelStyle)
 color channelBandColor = input.color(color.olive, "", inline = "백그라운드", group=channelStyle)
 
 // RSI
@@ -158,11 +158,12 @@ var float[] fib_norm_levels = array.new_float()
 
 if array.size(fib_norm_levels) == 0
     array.push(fib_norm_levels, 0.0)
+    array.push(fib_norm_levels, 0.236)
     array.push(fib_norm_levels, 0.382)
     array.push(fib_norm_levels, 0.618)
+    array.push(fib_norm_levels, 0.786)
     array.push(fib_norm_levels, 1.0)
-    array.push(fib_norm_levels, 1.618)
-
+    //array.push(fib_norm_levels, 1.618)
 // 채널 라인/필 업데이트
 if bar_ready and (isPercent ? not na(mult) : not na(dev))
     // 중앙선
@@ -305,6 +306,7 @@ if barstate.islast and bar_ready and (isPercent ? not na(mult) : not na(dev))
         label.set_xy(lblSlope, bar_index, upper_end)
         label.set_text(lblSlope, slopeText)
 
+// 피보나치 채널 작도 부분 (수정된 버전)
 if barstate.islast
     bool showFibo = isPercent and calcFiboChannel and bar_ready and not na(mult)
     if showFibo
@@ -313,37 +315,51 @@ if barstate.islast
             array.push(fib_lines, na)
         while array.size(fib_labels) < count
             array.push(fib_labels, na)
+            
+        // 피보나치 레벨을 우측으로 연장할 바 수 (채널 길이의 15%)
+        int extension_bars = math.max(math.round(channelLength * 0.15), 10)
+        
         for i = 0 to count - 1
             float n = array.get(fib_norm_levels, i)
-            float lvl = (slope >= 0 ? 0.3 + 0.4 * n : 0.7 - 0.4 * n)
-            float y_start = f_channel_level(lvl, lower_start, reg_start, upper_start)
-            float y_end   = f_channel_level(lvl, lower_end,   reg_end,   upper_end)
+            
+            // 수정: 실제 차트상의 기울기를 기준으로 피보나치 채널 작도
+            // channelPercentChange >= 0이면 상승 추세, < 0이면 하락 추세
+            bool isRisingTrend = channelPercentChange >= 0
+            
+            float y_start = isRisingTrend ? f_channel_level(n, lower_start, reg_start, upper_start) : f_channel_level(n, upper_start, reg_start, lower_start)
+            float y_end = isRisingTrend ? f_channel_level(n, lower_end, reg_end, upper_end) : f_channel_level(n, upper_end, reg_end, lower_end)
+            
+            // 피보나치 라인의 기울기 계산하여 우측으로 연장
+            float fib_slope = (y_end - y_start) / (channelLength - 1)
+            float y_extended = y_end + fib_slope * extension_bars
+                
             line ln = array.get(fib_lines, i)
             if na(ln)
-                ln := line.new(bar_index[channelLength], y_start, bar_index, y_end, xloc=xloc.bar_index, color=chart.fg_color, style=line.style_dashed)
+                ln := line.new(bar_index[channelLength], y_start, bar_index + extension_bars, y_extended, xloc=xloc.bar_index, color=chart.fg_color, style=line.style_dashed)
                 array.set(fib_lines, i, ln)
             else
                 line.set_xy1(ln, bar_index[channelLength], y_start)
-                line.set_xy2(ln, bar_index, y_end)
+                line.set_xy2(ln, bar_index + extension_bars, y_extended)
             label lb = array.get(fib_labels, i)
             string txt = n == 1.0 ? "1.0" : str.tostring(n)
             if na(lb)
-                lb := label.new(bar_index, y_end, txt, style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+                lb := label.new(bar_index + extension_bars, y_extended, txt, style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
                 array.set(fib_labels, i, lb)
             else
-                label.set_xy(lb, bar_index, y_end)
+                label.set_xy(lb, bar_index + extension_bars, y_extended)
                 label.set_text(lb, txt)
     else
-        for i = 0 to array.size(fib_lines) - 1
-            line ln = array.get(fib_lines, i)
+        // fib_lines 안전 삭제
+        while array.size(fib_lines) > 0
+            line ln = array.pop(fib_lines)
             if not na(ln)
                 line.delete(ln)
-        array.clear(fib_lines)
-        for i = 0 to array.size(fib_labels) - 1
-            label lb = array.get(fib_labels, i)
+
+        // fib_labels 안전 삭제
+        while array.size(fib_labels) > 0
+            label lb = array.pop(fib_labels)
             if not na(lb)
                 label.delete(lb)
-        array.clear(fib_labels)
 
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 계산] DIVERGENCE CALC (Regular + Hidden)
