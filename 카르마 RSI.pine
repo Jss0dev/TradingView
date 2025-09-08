@@ -45,6 +45,8 @@ color overSoldLineColor    = input.color(color.gray, "", group=channelStyle, inl
 
 bool  fillChannelBand  = input.bool(true, "백그라운드", inline="백그라운드", group=channelStyle)
 color channelBandColor = input.color(color.olive, "", inline = "백그라운드", group=channelStyle)
+bool showFibChannels = input.bool(false, "Fibo Channels", group=channelStyle)
+showFibChannels := isPercent ? showFibChannels : false
 
 // RSI
 rsiStyle = "RSI 스타일"
@@ -151,6 +153,7 @@ var line     upper_line = na
 var line     lower_line = na
 var linefill ch_fill    = na
 var label    lblSlope   = na
+var array<line> fibLines = array.new<line>()
 
 // 채널 라인/필 업데이트
 if bar_ready and (isPercent ? not na(mult) : not na(dev))
@@ -174,6 +177,29 @@ if bar_ready and (isPercent ? not na(mult) : not na(dev))
         line.set_xy1(lower_line, bar_index[channelLength], lower_start)
         line.set_xy2(lower_line, bar_index,         lower_end)
 
+    // 피보나치 채널 라인
+    if isPercent and showFibChannels
+        float[] ratios = array.from(0.0, 0.236, 0.382, 0.618, 1.0, 1.618)
+        float delta_start = upper_start - reg_start
+        float delta_end   = upper_end   - reg_end
+        for i = 0 to array.size(ratios) - 1
+            float ratio = array.get(ratios, i)
+            float y1 = reg_start + delta_start * ratio
+            float y2 = reg_end   + delta_end   * ratio
+            line fl = na
+            if array.size(fibLines) <= i
+                fl := line.new(bar_index[channelLength], y1, bar_index, y2, xloc=xloc.bar_index, color=midLineColor, style=line.style_dotted)
+                array.push(fibLines, fl)
+            else
+                fl := array.get(fibLines, i)
+                line.set_xy1(fl, bar_index[channelLength], y1)
+                line.set_xy2(fl, bar_index,       y2)
+    else
+        if array.size(fibLines) > 0
+            for i = 0 to array.size(fibLines) - 1
+                line.delete(array.get(fibLines, i))
+            array.clear(fibLines)
+
     // 채움
     if fillChannelBand
         if na(ch_fill) and not na(upper_line) and not na(lower_line)
@@ -195,6 +221,10 @@ if not bar_ready or (isPercent ? na(mult) : na(dev))
         linefill.delete(ch_fill), ch_fill := na
     if not na(lblSlope)
         label.delete(lblSlope), lblSlope := na
+    if array.size(fibLines) > 0
+        for i = 0 to array.size(fibLines) - 1
+            line.delete(array.get(fibLines, i))
+        array.clear(fibLines)
 
 // ═══════════════════════════════════════════════════════════════
 // [RSI & 시그널] RSI / SIGNAL
