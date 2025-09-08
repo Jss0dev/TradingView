@@ -179,19 +179,37 @@ if bar_ready and (isPercent ? not na(mult) : not na(dev))
 
     // 피보나치 채널 라인
     if isPercent and showFibChannels
-        float[] ratios = array.from(0.0, 0.236, 0.382, 0.618, 1.0, 1.618)
-        float delta_start = upper_start - reg_start
-        float delta_end   = upper_end   - reg_end
-        for i = 0 to array.size(ratios) - 1
-            float ratio = array.get(ratios, i)
-            float y1 = reg_start + delta_start * ratio
-            float y2 = reg_end   + delta_end   * ratio
+        float delta_start = upper_start - lower_start
+        float delta_end   = upper_end   - lower_end
+        float topRatio = slope >= 0 ? 0.7 : 0.3
+        float botRatio = slope >= 0 ? 0.3 : 0.7
+        float full_delta_start = delta_start / (topRatio - botRatio)
+        float full_delta_end   = delta_end   / (topRatio - botRatio)
+        float zero_y1 = lower_start - full_delta_start * botRatio
+        float zero_y2 = lower_end   - full_delta_end   * botRatio
+        float[] base = array.from(0.0, 0.236, 0.382, 0.618, 1.0)
+        float extRatio = topRatio + (topRatio - botRatio) * 0.618
+        // 0선
+        line fl0 = na
+        if array.size(fibLines) == 0
+            fl0 := line.new(bar_index[channelLength], zero_y1, bar_index, zero_y2, xloc=xloc.bar_index, color=midLineColor, style=line.style_dotted)
+            array.push(fibLines, fl0)
+        else
+            fl0 := array.get(fibLines, 0)
+            line.set_xy1(fl0, bar_index[channelLength], zero_y1)
+            line.set_xy2(fl0, bar_index,       zero_y2)
+        int baseSize = array.size(base)
+        for i = 0 to baseSize
+            float ratioMapped = i < baseSize ? botRatio + (topRatio - botRatio) * array.get(base, i) : extRatio
+            float y1 = zero_y1 + full_delta_start * ratioMapped
+            float y2 = zero_y2 + full_delta_end   * ratioMapped
             line fl = na
-            if array.size(fibLines) <= i
+            int idx = i + 1
+            if array.size(fibLines) <= idx
                 fl := line.new(bar_index[channelLength], y1, bar_index, y2, xloc=xloc.bar_index, color=midLineColor, style=line.style_dotted)
                 array.push(fibLines, fl)
             else
-                fl := array.get(fibLines, i)
+                fl := array.get(fibLines, idx)
                 line.set_xy1(fl, bar_index[channelLength], y1)
                 line.set_xy2(fl, bar_index,       y2)
     else
