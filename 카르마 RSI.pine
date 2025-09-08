@@ -9,6 +9,7 @@ indicator("카르마RSI", overlay=true, max_bars_back=500)
 channelSettings = "Channel 설정"
 int   channelLength        = input.int(120, "채널 길이", minval=2, maxval=500,group=channelSettings)
 float channelWidth = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=channelSettings)
+bool  calcFiboChannel = input.bool(false, "피보나치 채널 확장", group=channelSettings)
 
 // 밴드 모드(기본=기존 방식 유지)
 groupMODE = "Band Mode"
@@ -151,6 +152,16 @@ var line     upper_line = na
 var line     lower_line = na
 var linefill ch_fill    = na
 var label    lblSlope   = na
+var array<line> fib_lines  = array.new_line()
+var array<label> fib_labels = array.new_label()
+var float[] fib_norm_levels = array.new_float()
+
+if array.size(fib_norm_levels) == 0
+    array.push(fib_norm_levels, 0.0)
+    array.push(fib_norm_levels, 0.382)
+    array.push(fib_norm_levels, 0.618)
+    array.push(fib_norm_levels, 1.0)
+    array.push(fib_norm_levels, 1.618)
 
 // 채널 라인/필 업데이트
 if bar_ready and (isPercent ? not na(mult) : not na(dev))
@@ -233,6 +244,12 @@ f_map_to_price_at(idx, r) =>
         float base = lower_end + lower_slope * idx
         base + step * (r - rsiLower)
 
+f_channel_level(level, yLower, yMid, yUpper) =>
+    if level <= 0.5
+        yLower + (yMid - yLower) * (level - 0.3) / 0.2
+    else
+        yMid + (yUpper - yMid) * (level - 0.5) / 0.2
+
 // 폴리라인 핸들/라벨
 var polyline pl_rsi = na
 var polyline pl_sig = na
@@ -287,6 +304,46 @@ if barstate.islast and bar_ready and (isPercent ? not na(mult) : not na(dev))
     else
         label.set_xy(lblSlope, bar_index, upper_end)
         label.set_text(lblSlope, slopeText)
+
+if barstate.islast
+    bool showFibo = isPercent and calcFiboChannel and bar_ready and not na(mult)
+    if showFibo
+        int count = array.size(fib_norm_levels)
+        while array.size(fib_lines) < count
+            array.push(fib_lines, na)
+        while array.size(fib_labels) < count
+            array.push(fib_labels, na)
+        for i = 0 to count - 1
+            float n = array.get(fib_norm_levels, i)
+            float lvl = (slope >= 0 ? 0.3 + 0.4 * n : 0.7 - 0.4 * n)
+            float y_start = f_channel_level(lvl, lower_start, reg_start, upper_start)
+            float y_end   = f_channel_level(lvl, lower_end,   reg_end,   upper_end)
+            line ln = array.get(fib_lines, i)
+            if na(ln)
+                ln := line.new(bar_index[channelLength], y_start, bar_index, y_end, xloc=xloc.bar_index, color=chart.fg_color, style=line.style_dashed)
+                array.set(fib_lines, i, ln)
+            else
+                line.set_xy1(ln, bar_index[channelLength], y_start)
+                line.set_xy2(ln, bar_index, y_end)
+            label lb = array.get(fib_labels, i)
+            string txt = n == 1.0 ? "1.0" : str.tostring(n)
+            if na(lb)
+                lb := label.new(bar_index, y_end, txt, style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+                array.set(fib_labels, i, lb)
+            else
+                label.set_xy(lb, bar_index, y_end)
+                label.set_text(lb, txt)
+    else
+        for i = 0 to array.size(fib_lines) - 1
+            line ln = array.get(fib_lines, i)
+            if not na(ln)
+                line.delete(ln)
+        array.clear(fib_lines)
+        for i = 0 to array.size(fib_labels) - 1
+            label lb = array.get(fib_labels, i)
+            if not na(lb)
+                label.delete(lb)
+        array.clear(fib_labels)
 
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 계산] DIVERGENCE CALC (Regular + Hidden)
