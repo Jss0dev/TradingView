@@ -179,13 +179,17 @@ if bar_ready and (isPercent ? not na(mult) : not na(dev))
 
     // 피보나치 채널 라인
     if isPercent and showFibChannels
-        float[] ratios = array.from(0.0, 0.236, 0.382, 0.618, 1.0, 1.618)
-        float delta_start = upper_start - reg_start
-        float delta_end   = upper_end   - reg_end
-        for i = 0 to array.size(ratios) - 1
-            float ratio = array.get(ratios, i)
-            float y1 = reg_start + delta_start * ratio
-            float y2 = reg_end   + delta_end   * ratio
+        float delta_start = upper_start - lower_start
+        float delta_end   = upper_end   - lower_end
+        float[] base = array.from(0.0, 0.236, 0.382, 0.618, 1.0)
+        float topRatio = slope >= 0 ? 0.7 : 0.3
+        float botRatio = slope >= 0 ? 0.3 : 0.7
+        float extRatio = topRatio + (topRatio - botRatio) * 0.618
+        int baseSize = array.size(base)
+        for i = 0 to baseSize
+            float ratioMapped = i < baseSize ? botRatio + (topRatio - botRatio) * array.get(base, i) : extRatio
+            float y1 = lower_start + delta_start * ratioMapped
+            float y2 = lower_end   + delta_end   * ratioMapped
             line fl = na
             if array.size(fibLines) <= i
                 fl := line.new(bar_index[channelLength], y1, bar_index, y2, xloc=xloc.bar_index, color=midLineColor, style=line.style_dotted)
