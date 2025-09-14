@@ -364,7 +364,13 @@ if barstate.islast
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 계산] DIVERGENCE CALC (Regular + Hidden)
 // ═══════════════════════════════════════════════════════════════
-bool regBull = false, regBear = false, hidBull = false, hidBear = false
+type DivergenceResult
+    bool regBull
+    bool regBear
+    bool hidBull
+    bool hidBear
+
+var DivergenceResult div = DivergenceResult.new(false, false, false, false)
 
 if calc_div
     // 피벗
@@ -385,22 +391,22 @@ if calc_div
     // Regular Bullish: Price LL & RSI HL (pivotlow)
     bool rsiHL   = not na(prev_rsiL_of_PL) and rsiLBR  > prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
     bool priceLL = not na(prev_lowL_of_PL) and lowLBR  < prev_lowL_of_PL
-    regBull := plFound and rsiHL and priceLL
+    div.regBull := plFound and rsiHL and priceLL
 
     // Hidden Bullish: Price HL & RSI LL (pivotlow)
     bool rsiLL   = not na(prev_rsiL_of_PL) and rsiLBR  < prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
     bool priceHL = not na(prev_lowL_of_PL) and lowLBR  > prev_lowL_of_PL
-    hidBull := plFound and rsiLL and priceHL
+    div.hidBull := plFound and rsiLL and priceHL
 
     // Regular Bearish: Price HH & RSI LH (pivothigh)
     bool rsiLH   = not na(prev_rsiL_of_PH) and rsiLBR  < prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
     bool priceHH = not na(prev_highL_of_PH) and highLBR > prev_highL_of_PH
-    regBear := phFound and rsiLH and priceHH
+    div.regBear := phFound and rsiLH and priceHH
 
     // Hidden Bearish: Price LH & RSI HH (pivothigh)
     bool rsiHH   = not na(prev_rsiL_of_PH) and rsiLBR  > prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
     bool priceLH = not na(prev_highL_of_PH) and highLBR < prev_highL_of_PH
-    hidBear := phFound and rsiHH and priceLH
+    div.hidBear := phFound and rsiHH and priceLH
 
 // 다이버전스 마커용 좌표(전역 계산)
 float y_div = na
@@ -413,13 +419,13 @@ bool canPlotDiv = calc_div and bar_ready and (isPercent ? not na(mult) : not na(
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 표시/알림] (전역에서 호출: local scope 금지)
 // ═══════════════════════════════════════════════════════════════
-plotshape(canPlotDiv and regBull ? y_div : na, title="Regular Bullish", style=shape.labelup,   text="Reg Bull", color=colRegBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
-plotshape(canPlotDiv and regBear ? y_div : na, title="Regular Bearish", style=shape.labeldown, text="Reg Bear", color=colRegBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
-plotshape(canPlotDiv and hidBull ? y_div : na, title="Hidden Bullish",  style=shape.triangleup,   text="Hid Bull", color=colHidBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
-plotshape(canPlotDiv and hidBear ? y_div : na, title="Hidden Bearish",  style=shape.triangledown, text="Hid Bear", color=colHidBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
+plotshape(canPlotDiv and div.regBull ? y_div : na, title="Regular Bullish", style=shape.labelup,   text="Reg Bull", color=colRegBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
+plotshape(canPlotDiv and div.regBear ? y_div : na, title="Regular Bearish", style=shape.labeldown, text="Reg Bear", color=colRegBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
+plotshape(canPlotDiv and div.hidBull ? y_div : na, title="Hidden Bullish",  style=shape.triangleup,   text="Hid Bull", color=colHidBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
+plotshape(canPlotDiv and div.hidBear ? y_div : na, title="Hidden Bearish",  style=shape.triangledown, text="Hid Bear", color=colHidBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
 
 // 알림
-alertcondition(calc_div and regBull, title="KarmaRSI Regular Bullish", message="KarmaRSI: Regular Bullish Divergence")
-alertcondition(calc_div and regBear, title="KarmaRSI Regular Bearish", message="KarmaRSI: Regular Bearish Divergence")
-alertcondition(calc_div and hidBull, title="KarmaRSI Hidden Bullish",  message="KarmaRSI: Hidden Bullish Divergence")
-alertcondition(calc_div and hidBear, title="KarmaRSI Hidden Bearish",  message="KarmaRSI: Hidden Bearish Divergence")
+alertcondition(calc_div and div.regBull, title="KarmaRSI Regular Bullish", message="KarmaRSI: Regular Bullish Divergence")
+alertcondition(calc_div and div.regBear, title="KarmaRSI Regular Bearish", message="KarmaRSI: Regular Bearish Divergence")
+alertcondition(calc_div and div.hidBull, title="KarmaRSI Hidden Bullish",  message="KarmaRSI: Hidden Bullish Divergence")
+alertcondition(calc_div and div.hidBear, title="KarmaRSI Hidden Bearish",  message="KarmaRSI: Hidden Bearish Divergence")
