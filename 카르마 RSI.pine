@@ -99,53 +99,52 @@ f_inRange(cond, lo, hi) =>
 // ═══════════════════════════════════════════════════════════════
 bool  bar_ready   = bar_index >= channelLength - 1
 
-type ChannelState
-    float slope                = na
-    float intercept            = na
-    float reg_start            = na
-    float reg_end              = na
-    float upper_start          = na
-    float upper_end            = na
-    float lower_start          = na
-    float lower_end            = na
-    float dev                  = na
-    float mult                 = na
-    float channelPercentChange = na
-    float s_per                = na
-    float c_per                = na
-    float devLog               = na
+float slope       = na
+float intercept   = na
+float reg_start   = na
+float reg_end     = na
+float dev         = na
+float upper_start = na
+float upper_end   = na
+float lower_start = na
+float lower_end   = na
+float channelPercentChange = na
 
-var ChannelState channel = ChannelState.new()
+// 퍼센트 모드용 보조 변수
+float s_per = na
+float c_per = na
+float mult = na
+float devLog = na
 
 if bar_ready
     // 공통: 로그 회귀 직선(로그 공간)
-    [channel.slope, channel.intercept] = f_log_regression(close, channelLength)
+    [slope, intercept] = f_log_regression(close, channelLength)
     // per축: 현재=1, 과거=len
-    channel.reg_start := math.exp(channel.intercept + channel.slope * channelLength)
-    channel.reg_end   := math.exp(channel.intercept + channel.slope * 1.0)
+    reg_start := math.exp(intercept + slope * channelLength)
+    reg_end   := math.exp(intercept + slope * 1.0)
 
     if isPercent
         // 로그 편차 기반 퍼센트 밴드
         float lnClose = math.log(math.max(close, 1e-10))
-        channel.devLog := ta.stdev(lnClose, channelLength)
-        channel.mult   := math.exp(channel.devLog * channelWidth)
-        channel.s_per  := channel.slope
-        channel.c_per  := channel.intercept
+        devLog := ta.stdev(lnClose, channelLength)
+        mult   := math.exp(devLog * channelWidth)
+        s_per  := slope
+        c_per  := intercept
 
-        channel.upper_start := channel.reg_start * channel.mult
-        channel.upper_end   := channel.reg_end   * channel.mult
-        channel.lower_start := channel.reg_start / channel.mult
-        channel.lower_end   := channel.reg_end   / channel.mult
+        upper_start := reg_start * mult
+        upper_end   := reg_end   * mult
+        lower_start := reg_start / mult
+        lower_end   := reg_end   / mult
     else
         // 기존 방식: 선형 가격 편차(== 현행과 완전히 동일)
-        channel.dev         := ta.stdev(close, channelLength)
-        channel.upper_start := channel.reg_start + channel.dev * channelWidth
-        channel.upper_end   := channel.reg_end   + channel.dev * channelWidth
-        channel.lower_start := channel.reg_start - channel.dev * channelWidth
-        channel.lower_end   := channel.reg_end   - channel.dev * channelWidth
+        dev         := ta.stdev(close, channelLength)
+        upper_start := reg_start + dev * channelWidth
+        upper_end   := reg_end   + dev * channelWidth
+        lower_start := reg_start - dev * channelWidth
+        lower_end   := reg_end   - dev * channelWidth
 
     // 채널 % 변화(현행 계산식 유지)
-    channel.channelPercentChange := (channel.reg_end - channel.reg_start) / channel.reg_start * 100
+    channelPercentChange := (reg_end - reg_start) / reg_start * 100
 
 // 라인/필 핸들
 var line     mid_line  = na
@@ -166,26 +165,26 @@ if array.size(fib_norm_levels) == 0
     array.push(fib_norm_levels, 1.0)
     //array.push(fib_norm_levels, 1.618)
 // 채널 라인/필 업데이트
-if bar_ready and (isPercent ? not na(channel.mult) : not na(channel.dev))
+if bar_ready and (isPercent ? not na(mult) : not na(dev))
     // 중앙선
     if na(mid_line)
-        mid_line := line.new(bar_index[channelLength], channel.reg_start, bar_index, channel.reg_end, xloc=xloc.bar_index, color=showMidLine ? midLineColor : na, style=line.style_dashed)
+        mid_line := line.new(bar_index[channelLength], reg_start, bar_index, reg_end, xloc=xloc.bar_index, color=showMidLine ? midLineColor : na, style=line.style_dashed)
     else
-        line.set_xy1(mid_line, bar_index[channelLength], channel.reg_start)
-        line.set_xy2(mid_line, bar_index,       channel.reg_end)
+        line.set_xy1(mid_line, bar_index[channelLength], reg_start)
+        line.set_xy2(mid_line, bar_index,       reg_end)
 
     // 상/하단
     if na(upper_line)
-        upper_line := line.new(bar_index[channelLength], channel.upper_start, bar_index, channel.upper_end, xloc=xloc.bar_index, color=showOverBoughtLine ? overBoughtLineColor : na, width=2)
+        upper_line := line.new(bar_index[channelLength], upper_start, bar_index, upper_end, xloc=xloc.bar_index, color=showOverBoughtLine ? overBoughtLineColor : na, width=2)
     else
-        line.set_xy1(upper_line, bar_index[channelLength], channel.upper_start)
-        line.set_xy2(upper_line, bar_index,         channel.upper_end)
+        line.set_xy1(upper_line, bar_index[channelLength], upper_start)
+        line.set_xy2(upper_line, bar_index,         upper_end)
 
     if na(lower_line)
-        lower_line := line.new(bar_index[channelLength], channel.lower_start, bar_index, channel.lower_end, xloc=xloc.bar_index, color=showOverSoldLine ? overSoldLineColor : na, width=2)
+        lower_line := line.new(bar_index[channelLength], lower_start, bar_index, lower_end, xloc=xloc.bar_index, color=showOverSoldLine ? overSoldLineColor : na, width=2)
     else
-        line.set_xy1(lower_line, bar_index[channelLength], channel.lower_start)
-        line.set_xy2(lower_line, bar_index,         channel.lower_end)
+        line.set_xy1(lower_line, bar_index[channelLength], lower_start)
+        line.set_xy2(lower_line, bar_index,         lower_end)
 
     // 채움
     if fillChannelBand
@@ -197,7 +196,7 @@ if bar_ready and (isPercent ? not na(channel.mult) : not na(channel.dev))
             ch_fill := na
 
 // 준비 미충족 시 정리
-if not bar_ready or (isPercent ? na(channel.mult) : na(channel.dev))
+if not bar_ready or (isPercent ? na(mult) : na(dev))
     if not na(mid_line)
         line.delete(mid_line),  mid_line  := na
     if not na(upper_line)
@@ -221,29 +220,29 @@ int   rsiLower = 30
 // 기존(절대) 모드용 매핑 준비: 직선 가정(현행과 동일 유지)
 float lower_slope = na
 float step        = na
-if (not isPercent) and bar_ready and not na(channel.dev)
-    lower_slope := (channel.lower_start - channel.lower_end) / (channelLength - 1)
-    step        := (channel.upper_end   - channel.lower_end) / (rsiUpper - rsiLower)
+if (not isPercent) and bar_ready and not na(dev)
+    lower_slope := (lower_start - lower_end) / (channelLength - 1)
+    step        := (upper_end   - lower_end) / (rsiUpper - rsiLower)
 
 // 퍼센트 모드용: 각 i에서 밴드를 직접 계산
-f_reg_at(channel, i) =>
+f_reg_at(i) =>
     // per = 1 + i (0=현재)
-    math.exp(channel.c_per + channel.s_per * (1.0 + i))
+    math.exp(c_per + s_per * (1.0 + i))
 
-f_upper_at(channel, i) =>
-    f_reg_at(channel, i) * channel.mult
+f_upper_at(i) =>
+    f_reg_at(i) * mult
 
-f_lower_at(channel, i) =>
-    f_reg_at(channel, i) / channel.mult
+f_lower_at(i) =>
+    f_reg_at(i) / mult
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
-f_map_to_price_at(channel, idx, r) =>
+f_map_to_price_at(idx, r) =>
     if isPercent
-        float lo = f_lower_at(channel, idx)
-        float hi = f_upper_at(channel, idx)
+        float lo = f_lower_at(idx)
+        float hi = f_upper_at(idx)
         lo + (hi - lo) * (r - rsiLower) / (rsiUpper - rsiLower)
     else
-        float base = channel.lower_end + lower_slope * idx
+        float base = lower_end + lower_slope * idx
         base + step * (r - rsiLower)
 
 f_channel_level(level, yLower, yMid, yUpper) =>
@@ -253,72 +252,63 @@ f_channel_level(level, yLower, yMid, yUpper) =>
         yMid + (yUpper - yMid) * (level - 0.5) / 0.2
 
 // 폴리라인 핸들/라벨
-type RsiPlotHandles
-    polyline pl_rsi
-    polyline pl_sig
-    label lbl_rsi
-    label lbl_lo
-    label lbl_hi
-    array<chart.point> points_rsi
-    array<chart.point> points_sig
-
-RsiPlotHandles.new() =>
-    RsiPlotHandles(na, na, na, na, na, array.new<chart.point>(), array.new<chart.point>())
-
-RsiPlotHandles.update(this) =>
-    if not na(this.pl_rsi)
-        polyline.delete(this.pl_rsi)
-        this.pl_rsi := na
-    if not na(this.pl_sig)
-        polyline.delete(this.pl_sig)
-        this.pl_sig := na
-    if not na(this.lbl_rsi)
-        label.delete(this.lbl_rsi)
-        this.lbl_rsi := na
-    if not na(this.lbl_lo)
-        label.delete(this.lbl_lo)
-        this.lbl_lo := na
-    if not na(this.lbl_hi)
-        label.delete(this.lbl_hi)
-        this.lbl_hi := na
-
-    array.clear(this.points_rsi)
-    for i = 0 to channelLength - 1
-        float y = f_map_to_price_at(i, rsi[i])
-        array.push(this.points_rsi, chart.point.from_index(bar_index[i], y))
-    if showRsiLine
-        this.pl_rsi := polyline.new(this.points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
-
-    array.clear(this.points_sig)
-    for i = 0 to channelLength - 1
-        float yS = f_map_to_price_at(i, sig[i])
-        array.push(this.points_sig, chart.point.from_index(bar_index[i], yS))
-    if showSignalLine
-        this.pl_sig := polyline.new(this.points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
-
-    this.lbl_rsi := label.new(bar_index, (upper_end + lower_end) / 2, "카르마 RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
-
-    if showRsiUpperThresholdLabels
-        this.lbl_hi := label.new(bar_index, upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
-    if showRsiLowerThresholdLabels
-        this.lbl_lo := label.new(bar_index, lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
-
-var RsiPlotHandles rsiPlot = RsiPlotHandles.new()
+var polyline pl_rsi = na
+var polyline pl_sig = na
+var label    lbl_rsi = na
+var label    lbl_lo  = na
+var label    lbl_hi  = na
+var array<chart.point> points_rsi = array.new<chart.point>()
+var array<chart.point> points_sig = array.new<chart.point>()
 
 // 마지막 바에서만 폴리라인/라벨 갱신
 if barstate.islast and bar_ready and (isPercent ? not na(mult) : not na(dev))
-    rsiPlot.update()
+    // 정리
+    if not na(pl_rsi)
+        polyline.delete(pl_rsi), pl_rsi := na
+    if not na(pl_sig)
+        polyline.delete(pl_sig), pl_sig := na
+    if not na(lbl_rsi)
+        label.delete(lbl_rsi), lbl_rsi := na
+    if not na(lbl_lo)
+        label.delete(lbl_lo),  lbl_lo  := na
+    if not na(lbl_hi)
+        label.delete(lbl_hi),  lbl_hi  := na
 
-    string slopeText = "기울기: " + str.format("{0,number,0.###}%", channel.channelPercentChange)
+    // RSI 폴리라인
+    array.clear(points_rsi)
+    for i = 0 to channelLength - 1
+        float y = f_map_to_price_at(i, rsi[i])
+        array.push(points_rsi, chart.point.from_index(bar_index[i], y))
+    if showRsiLine
+        pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
+
+    // 시그널 폴리라인
+    array.clear(points_sig)
+    for i = 0 to channelLength - 1
+        float yS = f_map_to_price_at(i, sig[i])
+        array.push(points_sig, chart.point.from_index(bar_index[i], yS))
+    if showSignalLine
+        pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
+
+    // 라벨
+    float y_now = f_map_to_price_at(0, rsi)
+    lbl_rsi := label.new(bar_index, (upper_end + lower_end) / 2, "RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+
+    if showRsiUpperThresholdLabels
+        lbl_hi := label.new(bar_index, upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    if showRsiLowerThresholdLabels
+        lbl_lo := label.new(bar_index, lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+
+    string slopeText = "기울기: " + str.format("{0,number,0.###}%", channelPercentChange)
     if na(lblSlope)
-        lblSlope := label.new(bar_index, channel.upper_end, slopeText, style = label.style_label_lower_right, textcolor=chart.fg_color, color=color.new(color.black, 100) )
+        lblSlope := label.new(bar_index, upper_end, slopeText, style = label.style_label_lower_right, textcolor=chart.fg_color, color=color.new(color.black, 100) )
     else
-        label.set_xy(lblSlope, bar_index, channel.upper_end)
+        label.set_xy(lblSlope, bar_index, upper_end)
         label.set_text(lblSlope, slopeText)
 
 // 피보나치 채널 작도 부분 (수정된 버전)
 if barstate.islast
-    bool showFibo = isPercent and calcFiboChannel and bar_ready and not na(channel.mult)
+    bool showFibo = isPercent and calcFiboChannel and bar_ready and not na(mult)
     if showFibo
         int count = array.size(fib_norm_levels)
         while array.size(fib_lines) < count
@@ -334,10 +324,10 @@ if barstate.islast
             
             // 수정: 실제 차트상의 기울기를 기준으로 피보나치 채널 작도
             // channelPercentChange >= 0이면 상승 추세, < 0이면 하락 추세
-            bool isRisingTrend = channel.channelPercentChange >= 0
-
-            float y_start = isRisingTrend ? f_channel_level(n, channel.lower_start, channel.reg_start, channel.upper_start) : f_channel_level(n, channel.upper_start, channel.reg_start, channel.lower_start)
-            float y_end = isRisingTrend ? f_channel_level(n, channel.lower_end, channel.reg_end, channel.upper_end) : f_channel_level(n, channel.upper_end, channel.reg_end, channel.lower_end)
+            bool isRisingTrend = channelPercentChange >= 0
+            
+            float y_start = isRisingTrend ? f_channel_level(n, lower_start, reg_start, upper_start) : f_channel_level(n, upper_start, reg_start, lower_start)
+            float y_end = isRisingTrend ? f_channel_level(n, lower_end, reg_end, upper_end) : f_channel_level(n, upper_end, reg_end, lower_end)
             
             // 피보나치 라인의 기울기 계산하여 우측으로 연장
             float fib_slope = (y_end - y_start) / (channelLength - 1)
@@ -374,13 +364,7 @@ if barstate.islast
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 계산] DIVERGENCE CALC (Regular + Hidden)
 // ═══════════════════════════════════════════════════════════════
-type DivergenceResult
-    bool regBull
-    bool regBear
-    bool hidBull
-    bool hidBear
-
-var DivergenceResult div = DivergenceResult.new(false, false, false, false)
+bool regBull = false, regBear = false, hidBull = false, hidBear = false
 
 if calc_div
     // 피벗
@@ -401,41 +385,41 @@ if calc_div
     // Regular Bullish: Price LL & RSI HL (pivotlow)
     bool rsiHL   = not na(prev_rsiL_of_PL) and rsiLBR  > prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
     bool priceLL = not na(prev_lowL_of_PL) and lowLBR  < prev_lowL_of_PL
-    div.regBull := plFound and rsiHL and priceLL
+    regBull := plFound and rsiHL and priceLL
 
     // Hidden Bullish: Price HL & RSI LL (pivotlow)
     bool rsiLL   = not na(prev_rsiL_of_PL) and rsiLBR  < prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
     bool priceHL = not na(prev_lowL_of_PL) and lowLBR  > prev_lowL_of_PL
-    div.hidBull := plFound and rsiLL and priceHL
+    hidBull := plFound and rsiLL and priceHL
 
     // Regular Bearish: Price HH & RSI LH (pivothigh)
     bool rsiLH   = not na(prev_rsiL_of_PH) and rsiLBR  < prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
     bool priceHH = not na(prev_highL_of_PH) and highLBR > prev_highL_of_PH
-    div.regBear := phFound and rsiLH and priceHH
+    regBear := phFound and rsiLH and priceHH
 
     // Hidden Bearish: Price LH & RSI HH (pivothigh)
     bool rsiHH   = not na(prev_rsiL_of_PH) and rsiLBR  > prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
     bool priceLH = not na(prev_highL_of_PH) and highLBR < prev_highL_of_PH
-    div.hidBear := phFound and rsiHH and priceLH
+    hidBear := phFound and rsiHH and priceLH
 
 // 다이버전스 마커용 좌표(전역 계산)
 float y_div = na
-  if bar_ready and (isPercent ? not na(channel.mult) : not na(channel.dev))
-      y_div := f_map_to_price_at(channel, lbRight, rsi[lbRight])
+if bar_ready and (isPercent ? not na(mult) : not na(dev))
+    y_div := f_map_to_price_at(lbRight, rsi[lbRight])
 
 // 플래그(표시 가능 여부)
-  bool canPlotDiv = calc_div and bar_ready and (isPercent ? not na(channel.mult) : not na(channel.dev))
+bool canPlotDiv = calc_div and bar_ready and (isPercent ? not na(mult) : not na(dev))
 
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 표시/알림] (전역에서 호출: local scope 금지)
 // ═══════════════════════════════════════════════════════════════
-plotshape(canPlotDiv and div.regBull ? y_div : na, title="Regular Bullish", style=shape.labelup,   text="Reg Bull", color=colRegBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
-plotshape(canPlotDiv and div.regBear ? y_div : na, title="Regular Bearish", style=shape.labeldown, text="Reg Bear", color=colRegBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
-plotshape(canPlotDiv and div.hidBull ? y_div : na, title="Hidden Bullish",  style=shape.triangleup,   text="Hid Bull", color=colHidBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
-plotshape(canPlotDiv and div.hidBear ? y_div : na, title="Hidden Bearish",  style=shape.triangledown, text="Hid Bear", color=colHidBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
+plotshape(canPlotDiv and regBull ? y_div : na, title="Regular Bullish", style=shape.labelup,   text="Reg Bull", color=colRegBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
+plotshape(canPlotDiv and regBear ? y_div : na, title="Regular Bearish", style=shape.labeldown, text="Reg Bear", color=colRegBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
+plotshape(canPlotDiv and hidBull ? y_div : na, title="Hidden Bullish",  style=shape.triangleup,   text="Hid Bull", color=colHidBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
+plotshape(canPlotDiv and hidBear ? y_div : na, title="Hidden Bearish",  style=shape.triangledown, text="Hid Bear", color=colHidBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
 
 // 알림
-alertcondition(calc_div and div.regBull, title="KarmaRSI Regular Bullish", message="KarmaRSI: Regular Bullish Divergence")
-alertcondition(calc_div and div.regBear, title="KarmaRSI Regular Bearish", message="KarmaRSI: Regular Bearish Divergence")
-alertcondition(calc_div and div.hidBull, title="KarmaRSI Hidden Bullish",  message="KarmaRSI: Hidden Bullish Divergence")
-alertcondition(calc_div and div.hidBear, title="KarmaRSI Hidden Bearish",  message="KarmaRSI: Hidden Bearish Divergence")
+alertcondition(calc_div and regBull, title="KarmaRSI Regular Bullish", message="KarmaRSI: Regular Bullish Divergence")
+alertcondition(calc_div and regBear, title="KarmaRSI Regular Bearish", message="KarmaRSI: Regular Bearish Divergence")
+alertcondition(calc_div and hidBull, title="KarmaRSI Hidden Bullish",  message="KarmaRSI: Hidden Bullish Divergence")
+alertcondition(calc_div and hidBear, title="KarmaRSI Hidden Bearish",  message="KarmaRSI: Hidden Bearish Divergence")
