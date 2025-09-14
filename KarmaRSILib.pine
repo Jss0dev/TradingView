@@ -28,7 +28,7 @@ export f_log_regression(series float src, int len) =>
     float s   = -a
     float c   = a * len + b
     [s, c]
-
+    
 export f_inRange(series bool cond, int lo, int hi) =>
     int bars = ta.barssince(cond)
     lo <= bars and bars <= hi
