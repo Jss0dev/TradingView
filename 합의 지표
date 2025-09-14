@@ -1,0 +1,344 @@
+//@version=6
+indicator("Consensus Reversal TMP", overlay=false, max_lines_count=500, max_labels_count=500)
+import Clody_0310/KarmaRSILib/1 as k
+
+// =============================
+// 프리셋 선택 및 공통 파라미터
+// =============================
+groupPRESET = "프리셋 선택"
+i_preset = input.string("표준", "모드", options=["표준", "보수", "공격"], group=groupPRESET)
+isStd = i_preset == "표준"
+isCon = i_preset == "보수"
+isAgg = i_preset == "공격"
+
+// 채널(Percent 모드만 사용)
+groupREGIME = "레짐(Percent 전용)"
+CHANNEL_LEN   = input.int(120, "채널 길이(고정)", group=groupREGIME)
+CHANNEL_WIDTH = input.float(1.5, "채널 폭", step=0.1, group=groupREGIME)
+// 레짐 임계(퍼센트 변화 기반)
+PC_THRESH_ABS   = input.float(0.10, "레짐 임계: 최소 절대 변화(%)", step=0.01, group=groupREGIME)
+PC_THRESH_ATR_M = input.float(0.25, "레짐 임계: ATR% 가중(배)", step=0.05, group=groupREGIME)
+
+// =============================
+// 지표 프리셋
+// =============================
+// MACD
+MACD_FAST   =  isStd ? 18 : isCon ? 24 : 14
+MACD_SLOW   =  isStd ? 45 : isCon ? 60 : 35
+MACD_SIGNAL =  isStd ?  7 : isCon ? 12 :  6
+
+// RSI
+RSI_LEN = isStd ? 24 : isCon ? 30 : 20
+RSI_OB  = 70
+RSI_OS  = 30
+
+// CCI (SMA 고정)
+CCI_LEN     = isStd ? 30 : isCon ? 40 : 24
+CCI_SMOOTH  = isStd ? 3  : isCon ? 5  : 2
+CCI_LVL_PRIMARY   = isStd ? 100 : isCon ? 150 : 100
+CCI_LVL_SECONDARY = isStd ? 150 : isCon ? 200 :  75
+
+// BB (SMA 고정)
+BB_LEN   = isStd ? 20 : isCon ? 30 : 18
+BB_STDEV = isStd ? 2.0 : isCon ? 2.5 : 2.0
+
+// ADX (DI, Smoothing)
+ADX_DI_LEN = isStd ? 12 : isCon ? 14 : 10
+ADX_SMOOTH = isStd ?  9 : isCon ? 10 :  8
+ADX_MIN_LVL = 20
+
+// SAR
+SAR_STEP    = isStd ? 0.02 : isCon ? 0.01 : 0.03
+SAR_MAXSTEP = isStd ? 0.20 : isCon ? 0.10 : 0.30
+
+// OBV (EMA 고정)
+OBV_LEN = isStd ? 20 : isCon ? 30 : 10
+
+// 캔들 패턴
+PAT_LOC_EPS_SIGMA = 0.5
+PAT_ENG_KBODY      = isStd ? 1.10 : isCon ? 1.15 : 1.05
+PAT_ENG_FULL_ONLY  = isStd ? true : isCon ? true : false
+PAT_MIN_BODY_ATR   = isStd ? 0.50 : isCon ? 0.60 : 0.40
+PAT_PIN_RWICK      = isStd ? 2.5  : isCon ? 3.0  : 2.0
+PAT_TWZ_EPS_ATR    = isStd ? 0.30 : isCon ? 0.20 : 0.40
+
+// 피보 되돌림(0.382~0.618)
+FIB_MIN = 0.382
+FIB_MAX = 0.618
+FIB_TOL_PCT = isStd ? 0.70 : isCon ? 0.50 : 1.00  // %
+FIB_INVALIDATE_ON_CLEAN_0618_BREAK = true
+
+// 합의
+CONS_MIN_SCORE = isStd ? 4 : isCon ? 5 : 3
+CONS_COOLDOWN  = isStd ? 10 : isCon ? 12 : 8
+REQ_MACD       = isStd or isAgg
+REQ_ADX_OR_SAR = isCon
+
+// 가중치
+W_MACD = 2
+W_RSI  = 1
+W_CCI  = 1
+W_BB   = 1
+W_ADX  = isCon ? 2 : 1
+W_SAR  = 1
+W_OBV  = 1
+W_PAT_STRONG = 2
+W_PAT_NORMAL = 1
+W_FIB_PIVOT  = 1
+W_FIB_SWING  = 2
+
+// =============================
+// 디버그 옵션 (라벨 + 테이블)
+// =============================
+groupDEBUG = "디버그 옵션"
+showDebug = input.bool(true, "디버그(라벨/테이블) 표시", group=groupDEBUG)
+
+// =============================
+// 채널(Percent 모드) 계산 + 레짐
+// =============================
+bool IS_PERCENT = true
+[ch, pct, ready] = k.calc_channel(close, CHANNEL_LEN, CHANNEL_WIDTH, IS_PERCENT)
+
+// ATR% 기반 임계 계산
+atr = ta.atr(14)
+atrPct = (atr / close) * 100.0
+pc = ch.percentChange                                 // 누적 %변화
+pcThresh = math.max(PC_THRESH_ABS, atrPct * PC_THRESH_ATR_M)
+
+// 레짐 분류: pc%가 임계보다 클 때만 방향 확정, 그 외는 중립
+bool upTrend    = ready and (pc >  pcThresh)
+bool downTrend  = ready and (pc < -pcThresh)
+bool neutralReg = ready and not upTrend and not downTrend
+
+// =============================
+// 보조 공통 계산
+// =============================
+srcClose = close
+srcHLC3  = hlc3
+
+// =============================
+// MACD
+// =============================
+macdFast = ta.ema(srcClose, MACD_FAST)
+macdSlow = ta.ema(srcClose, MACD_SLOW)
+macdLine = macdFast - macdSlow
+macdSig  = ta.ema(macdLine, MACD_SIGNAL)
+macdBearCross = ta.crossunder(macdLine, macdSig)
+macdBullCross = ta.crossover(macdLine, macdSig)
+
+// =============================
+// RSI
+// =============================
+rsi = ta.rsi(srcClose, RSI_LEN)
+rsiOB_reject = rsi[1] > RSI_OB and rsi < RSI_OB
+rsiOS_reclaim = rsi[1] < RSI_OS and rsi > RSI_OS
+
+// =============================
+// CCI (근접 필터)
+// =============================
+cciRaw   = ta.cci(srcHLC3, CCI_LEN)
+cciSig   = ta.sma(cciRaw, CCI_SMOOTH)
+nearTop    = cciRaw >  CCI_LVL_PRIMARY * 0.8
+nearBottom = cciRaw < -CCI_LVL_PRIMARY * 0.8
+cciTopReject    = nearTop    and ta.crossunder(cciRaw, cciSig)
+cciBottomReject = nearBottom and ta.crossover(cciRaw, cciSig)
+
+// =============================
+// Bollinger Bands (SMA)
+// =============================
+bbBasis = ta.sma(srcHLC3, BB_LEN)
+bbStdev = ta.stdev(srcHLC3, BB_LEN)
+bbUpper = bbBasis + bbStdev * BB_STDEV
+bbLower = bbBasis - bbStdev * BB_STDEV
+bbUpperReentry = (high[1] > bbUpper[1] and close < bbUpper)
+bbLowerReentry = (low[1]  < bbLower[1] and close > bbLower)
+
+// 패턴 위치 근접
+nearUpper = math.abs(srcClose - bbUpper) <= (bbStdev * PAT_LOC_EPS_SIGMA)
+nearLower = math.abs(srcClose - bbLower) <= (bbStdev * PAT_LOC_EPS_SIGMA)
+
+// =============================
+// ADX / DI (v6 스펙)
+// =============================
+[plusDI, minusDI, adx] = ta.dmi(ADX_DI_LEN, ADX_SMOOTH)
+adxRising = adx > adx[1]
+adxBear = ta.crossover(minusDI, plusDI) and (adx >= ADX_MIN_LVL or adxRising)
+adxBull = ta.crossover(plusDI, minusDI) and (adx >= ADX_MIN_LVL or adxRising)
+
+// =============================
+// SAR
+// =============================
+sar = ta.sar(SAR_STEP, SAR_STEP, SAR_MAXSTEP)
+sarFlipBear = nz(sar[1]) < srcClose[1] and sar > srcClose
+sarFlipBull = nz(sar[1]) > srcClose[1] and sar < srcClose
+
+// =============================
+// OBV (EMA smoothing) + 다이버전스 근사
+// =============================
+obvRaw = ta.obv
+obvEma = ta.ema(obvRaw, OBV_LEN)
+
+phVal = ta.pivothigh(high, 5, 5)
+plVal = ta.pivotlow(low,  5, 5)
+pricePH_now  = ta.valuewhen(not na(phVal), phVal, 0)
+pricePH_prev = ta.valuewhen(not na(phVal), phVal, 1)
+obvPH_now    = ta.valuewhen(not na(phVal), obvEma[5], 0)
+obvPH_prev   = ta.valuewhen(not na(phVal), obvEma[5], 1)
+obvDivBear   = not na(pricePH_now) and not na(pricePH_prev) and (pricePH_now > pricePH_prev) and (obvPH_now < obvPH_prev)
+
+pricePL_now  = ta.valuewhen(not na(plVal), plVal, 0)
+pricePL_prev = ta.valuewhen(not na(plVal), plVal, 1)
+obvPL_now    = ta.valuewhen(not na(plVal), obvEma[5], 0)
+obvPL_prev   = ta.valuewhen(not na(plVal), obvEma[5], 1)
+obvDivBull   = not na(pricePL_now) and not na(pricePL_prev) and (pricePL_now < pricePL_prev) and (obvPL_now > obvPL_prev)
+
+// =============================
+// 캔들패턴
+// =============================
+body    = math.abs(close - open)
+upperW  = high - math.max(close, open)
+lowerW  = math.min(close, open) - low
+mid     = (high + low) / 2.0
+atrBody = ta.atr(14)
+atrPctBody  = atrBody > 0 ? body/atrBody : 0
+
+prevBull = close[1] > open[1]
+prevBear = close[1] < open[1]
+currBull = close > open
+currBear = close < open
+bodyPrev = math.abs(close[1] - open[1])
+fullEngulfBear = (open >= close[1]) and (close <= open[1])
+fullEngulfBull = (open <= close[1]) and (close >= open[1])
+
+engBear = prevBull and currBear and body >= bodyPrev * PAT_ENG_KBODY and (PAT_ENG_FULL_ONLY ? fullEngulfBear : true) and atrPctBody >= PAT_MIN_BODY_ATR and nearUpper
+engBull = prevBear and currBull and body >= bodyPrev * PAT_ENG_KBODY and (PAT_ENG_FULL_ONLY ? fullEngulfBull : true) and atrPctBody >= PAT_MIN_BODY_ATR and nearLower
+pinBear = (upperW >= body * PAT_PIN_RWICK) and (lowerW <= body * 0.5) and (close < mid) and nearUpper
+pinBull = (lowerW >= body * PAT_PIN_RWICK) and (upperW <= body * 0.5) and (close > mid) and nearLower
+epsATR = PAT_TWZ_EPS_ATR * atrBody
+twzTop    = (math.abs(high - high[1]) <= epsATR) and prevBull and currBear and nearUpper
+twzBottom = (math.abs(low  - low[1])  <= epsATR) and prevBear and currBull and nearLower
+
+patBear = engBear or pinBear or twzTop
+patBull = engBull or pinBull or twzBottom
+isStrongPinBear = pinBear and (upperW >= body * (PAT_PIN_RWICK + 0.5))
+isStrongPinBull = pinBull and (lowerW >= body * (PAT_PIN_RWICK + 0.5))
+isStrongPatternBear = (engBear and atrPctBody >= PAT_MIN_BODY_ATR) or isStrongPinBear
+isStrongPatternBull = (engBull and atrPctBody >= PAT_MIN_BODY_ATR) or isStrongPinBull
+
+// =============================
+// 피보나치 되돌림 (채널창 High/Low 스윙)
+// =============================
+float swingHigh = ta.highest(high, CHANNEL_LEN)
+float swingLow  = ta.lowest(low,  CHANNEL_LEN)
+float rangeHL   = math.max(swingHigh - swingLow, 1e-10)
+float retrUp    = (swingHigh - close) / rangeHL
+float retrDown  = (close - swingLow) / rangeHL
+
+float tol = FIB_TOL_PCT * 0.01
+inFibBear = upTrend and (retrUp >= (FIB_MIN - tol) and retrUp <= (FIB_MAX + tol))
+inFibBull = downTrend and (retrDown >= (FIB_MIN - tol) and retrDown <= (FIB_MAX + tol))
+
+invalidBear = upTrend   and FIB_INVALIDATE_ON_CLEAN_0618_BREAK and (retrUp   > FIB_MAX + tol)
+invalidBull = downTrend and FIB_INVALIDATE_ON_CLEAN_0618_BREAK and (retrDown > FIB_MAX + tol)
+
+fib50 = swingLow + rangeHL * 0.5
+confirmBear = upTrend   and inFibBear and (close < fib50) and (macdBearCross or rsiOB_reject)
+confirmBull = downTrend and inFibBull and (close > fib50) and (macdBullCross or rsiOS_reclaim)
+
+fibBearScore = invalidBear ? 0 : (confirmBear ? W_FIB_SWING : W_FIB_PIVOT)
+fibBullScore = invalidBull ? 0 : (confirmBull ? W_FIB_SWING : W_FIB_PIVOT)
+
+// =============================
+// 합의 카운팅 (레짐·쿨다운·필수조건)
+// =============================
+var int lastSignalBar = na
+scaleCD   = adx / 25.0
+clampedCD = math.max(0.8, math.min(scaleCD, 1.5))
+dynCooldown = math.round(CONS_COOLDOWN * clampedCD)
+cooldownOk = na(lastSignalBar) or (bar_index - lastSignalBar > dynCooldown)
+
+score = 0
+req_ok = true
+canSignal = ready and cooldownOk and not neutralReg
+
+if canSignal
+    if upTrend
+        score += macdBearCross ? W_MACD : 0
+        score += (rsiOB_reject ? W_RSI : 0)
+        score += (cciTopReject ? W_CCI : 0)
+        score += (bbUpperReentry ? W_BB : 0)
+        score += (adxBear ? W_ADX : 0)
+        score += (sarFlipBear ? W_SAR : 0)
+        score += (obvDivBear ? W_OBV : 0)
+        score += patBear ? (isStrongPatternBear ? W_PAT_STRONG : W_PAT_NORMAL) : 0
+        score += fibBearScore
+        req_ok := (not REQ_MACD or macdBearCross) and (not REQ_ADX_OR_SAR or (adxBear or sarFlipBear))
+    else if downTrend
+        score += macdBullCross ? W_MACD : 0
+        score += (rsiOS_reclaim ? W_RSI : 0)
+        score += (cciBottomReject ? W_CCI : 0)
+        score += (bbLowerReentry ? W_BB : 0)
+        score += (adxBull ? W_ADX : 0)
+        score += (sarFlipBull ? W_SAR : 0)
+        score += (obvDivBull ? W_OBV : 0)
+        score += patBull ? (isStrongPatternBull ? W_PAT_STRONG : W_PAT_NORMAL) : 0
+        score += fibBullScore
+        req_ok := (not REQ_MACD or macdBullCross) and (not REQ_ADX_OR_SAR or (adxBull or sarFlipBull))
+
+consensus = canSignal and req_ok and (score >= CONS_MIN_SCORE)
+
+// =============================
+// 표시 (라벨 + 테이블)
+// =============================
+plot(score, "Consensus Score", color=color.new(color.aqua, 0))
+hline(CONS_MIN_SCORE, "Min Score", color=color.new(color.gray, 50))
+
+plotchar(consensus and upTrend,     title="SELL★", char="▼", location=location.top,    size=size.tiny, color=color.red)
+plotchar(consensus and downTrend,   title="BUY★",  char="▲", location=location.bottom, size=size.tiny, color=color.lime)
+
+if consensus
+    lastSignalBar := bar_index
+    label.new(bar_index, na, (upTrend ? "CONSENSUS: Reversal ↓" : "CONSENSUS: Reversal ↑") + "\nmode=" + i_preset + " | score=" + str.tostring(score), style=label.style_label_left, textcolor=color.white, color=color.new(upTrend ? color.red : color.lime, 10))
+
+// ── 디버그: 라벨(마지막 바) 대신 테이블 제공 ──
+var table dbg = table.new(position.top_right, 2, 12, border_width=1)
+cooldownLeft = na(lastSignalBar) ? 0 : (dynCooldown - (bar_index - lastSignalBar))
+cooldownLeft := math.max(cooldownLeft, 0)
+sigDir = consensus ? (upTrend ? "SELL★" : "BUY★") : "—"
+
+if barstate.islast and showDebug
+    // 테이블 초기화 (2열 × 12행)
+    table.clear(dbg, 0, 0, 1, 11)
+
+    table.cell(dbg, 0, 0, "pct.slope / pc%", text_color=color.yellow)
+    table.cell(dbg, 1, 0, str.tostring(pct.s, format.mintick) + " / " + str.tostring(pc, format.percent))
+
+    table.cell(dbg, 0, 1, "Regime")
+    table.cell(dbg, 1, 1, upTrend ? "Up" : downTrend ? "Down" : "Neutral")
+
+    table.cell(dbg, 0, 2, "MACD (L/S)")
+    table.cell(dbg, 1, 2, str.tostring(macdLine, format.mintick) + " / " + str.tostring(macdSig, format.mintick))
+
+    table.cell(dbg, 0, 3, "RSI")
+    table.cell(dbg, 1, 3, str.tostring(rsi, format.mintick))
+
+    table.cell(dbg, 0, 4, "CCI")
+    table.cell(dbg, 1, 4, str.tostring(cciRaw, format.mintick))
+
+    table.cell(dbg, 0, 5, "ADX (+/-/ADX)")
+    table.cell(dbg, 1, 5, str.tostring(plusDI, format.mintick) + "/" + str.tostring(minusDI, format.mintick) + "/" + str.tostring(adx, format.mintick))
+
+    table.cell(dbg, 0, 6, "SAR")
+    table.cell(dbg, 1, 6, str.tostring(sar, format.mintick))
+
+    table.cell(dbg, 0, 7, "OBV EMA")
+    table.cell(dbg, 1, 7, str.tostring(obvEma, format.mintick))
+
+    table.cell(dbg, 0, 8, "Score / Min")
+    table.cell(dbg, 1, 8, str.tostring(score) + " / " + str.tostring(CONS_MIN_SCORE))
+
+    table.cell(dbg, 0, 9, "Cooldown 남음")
+    table.cell(dbg, 1, 9, str.tostring(cooldownLeft) + "/" + str.tostring(dynCooldown))
+
+    table.cell(dbg, 0, 10, "Signal")
+    table.cell(dbg, 1, 10, sigDir)
