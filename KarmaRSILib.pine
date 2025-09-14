@@ -19,7 +19,7 @@ type PercentParams
     float mult
     float devLog
 
-export f_log_regression(src, len) =>
+export f_log_regression(series float src, int len) =>
     float ln  = math.log(math.max(src, 1e-10))
     float y0  = ta.linreg(ln, len, 0)
     float y1  = ta.linreg(ln, len, 1)
@@ -28,12 +28,12 @@ export f_log_regression(src, len) =>
     float s   = -a
     float c   = a * len + b
     [s, c]
-
-export f_inRange(cond, lo, hi) =>
+    
+export f_inRange(series bool cond, int lo, int hi) =>
     int bars = ta.barssince(cond)
     lo <= bars and bars <= hi
 
-export calc_channel(closeSeries, channelLength, channelWidth, isPercent) =>
+export calc_channel(series float closeSeries, int channelLength, float channelWidth, bool isPercent) =>
     Channel ch = Channel.new(na, na, na, na, na, na, na, na, na, na)
     PercentParams pct = PercentParams.new(na, na, na, na)
     bool ready = bar_index >= channelLength - 1
@@ -62,7 +62,7 @@ export calc_channel(closeSeries, channelLength, channelWidth, isPercent) =>
         ch.percentChange := (ch.reg_end - ch.reg_start) / ch.reg_start * 100
     [ch, pct, ready]
 
-export map_to_price_at(idx, r, isPercent, ch, pct, rsiLower, rsiUpper, channelLength) =>
+export map_to_price_at(int idx, float r, bool isPercent, Channel ch, PercentParams pct, float rsiLower, float rsiUpper, int channelLength) =>
     if isPercent
         float reg = math.exp(pct.c + pct.s * (1.0 + idx))
         float lo = reg / pct.mult
@@ -74,13 +74,13 @@ export map_to_price_at(idx, r, isPercent, ch, pct, rsiLower, rsiUpper, channelLe
         float base        = ch.lower_end + lower_slope * idx
         base + step * (r - rsiLower)
 
-export channel_level(level, yLower, yMid, yUpper) =>
+export channel_level(float level, float yLower, float yMid, float yUpper) =>
     if level <= 0.5
         yLower + (yMid - yLower) * (level - 0.3) / 0.2
     else
         yMid + (yUpper - yMid) * (level - 0.5) / 0.2
 
-export calc_divergence(rsiSeries, lbLeft, lbRight, rgLower, rgUpper, lowSeries, highSeries) =>
+export calc_divergence(series float rsiSeries, int lbLeft, int lbRight, int rgLower, int rgUpper, series float lowSeries, series float highSeries) =>
     bool regBull = false, regBear = false, hidBull = false, hidBear = false
     bool plFound = not na(ta.pivotlow(rsiSeries, lbLeft, lbRight))
     bool phFound = not na(ta.pivothigh(rsiSeries, lbLeft, lbRight))
