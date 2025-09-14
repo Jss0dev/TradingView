@@ -125,8 +125,9 @@ var PercentParams pct = PercentParams.new(na, na, na, na)
 
 if bar_ready
     // 공통: 로그 회귀 직선(로그 공간)
-    [channel.slope, channel.intercept] = f_log_regression(close, channelLength)
-    // per축: 현재=1, 과거=len
+    [sl, icp] = f_log_regression(close, channelLength)
+    channel.intercept := icp
+    channel.slope     := sl
     channel.reg_start := math.exp(channel.intercept + channel.slope * channelLength)
     channel.reg_end   := math.exp(channel.intercept + channel.slope * 1.0)
 
