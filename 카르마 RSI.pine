@@ -252,52 +252,61 @@ f_channel_level(level, yLower, yMid, yUpper) =>
         yMid + (yUpper - yMid) * (level - 0.5) / 0.2
 
 // 폴리라인 핸들/라벨
-var polyline pl_rsi = na
-var polyline pl_sig = na
-var label    lbl_rsi = na
-var label    lbl_lo  = na
-var label    lbl_hi  = na
-var array<chart.point> points_rsi = array.new<chart.point>()
-var array<chart.point> points_sig = array.new<chart.point>()
+type RsiPlotHandles
+    polyline pl_rsi
+    polyline pl_sig
+    label lbl_rsi
+    label lbl_lo
+    label lbl_hi
+    array<chart.point> points_rsi
+    array<chart.point> points_sig
+
+RsiPlotHandles.new() =>
+    RsiPlotHandles(na, na, na, na, na, array.new<chart.point>(), array.new<chart.point>())
+
+RsiPlotHandles.update(this) =>
+    if not na(this.pl_rsi)
+        polyline.delete(this.pl_rsi)
+        this.pl_rsi := na
+    if not na(this.pl_sig)
+        polyline.delete(this.pl_sig)
+        this.pl_sig := na
+    if not na(this.lbl_rsi)
+        label.delete(this.lbl_rsi)
+        this.lbl_rsi := na
+    if not na(this.lbl_lo)
+        label.delete(this.lbl_lo)
+        this.lbl_lo := na
+    if not na(this.lbl_hi)
+        label.delete(this.lbl_hi)
+        this.lbl_hi := na
+
+    array.clear(this.points_rsi)
+    for i = 0 to channelLength - 1
+        float y = f_map_to_price_at(i, rsi[i])
+        array.push(this.points_rsi, chart.point.from_index(bar_index[i], y))
+    if showRsiLine
+        this.pl_rsi := polyline.new(this.points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
+
+    array.clear(this.points_sig)
+    for i = 0 to channelLength - 1
+        float yS = f_map_to_price_at(i, sig[i])
+        array.push(this.points_sig, chart.point.from_index(bar_index[i], yS))
+    if showSignalLine
+        this.pl_sig := polyline.new(this.points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
+
+    this.lbl_rsi := label.new(bar_index, (upper_end + lower_end) / 2, "카르마 RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+
+    if showRsiUpperThresholdLabels
+        this.lbl_hi := label.new(bar_index, upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    if showRsiLowerThresholdLabels
+        this.lbl_lo := label.new(bar_index, lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+
+var RsiPlotHandles rsiPlot = RsiPlotHandles.new()
 
 // 마지막 바에서만 폴리라인/라벨 갱신
 if barstate.islast and bar_ready and (isPercent ? not na(mult) : not na(dev))
-    // 정리
-    if not na(pl_rsi)
-        polyline.delete(pl_rsi), pl_rsi := na
-    if not na(pl_sig)
-        polyline.delete(pl_sig), pl_sig := na
-    if not na(lbl_rsi)
-        label.delete(lbl_rsi), lbl_rsi := na
-    if not na(lbl_lo)
-        label.delete(lbl_lo),  lbl_lo  := na
-    if not na(lbl_hi)
-        label.delete(lbl_hi),  lbl_hi  := na
-
-    // RSI 폴리라인
-    array.clear(points_rsi)
-    for i = 0 to channelLength - 1
-        float y = f_map_to_price_at(i, rsi[i])
-        array.push(points_rsi, chart.point.from_index(bar_index[i], y))
-    if showRsiLine
-        pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
-
-    // 시그널 폴리라인
-    array.clear(points_sig)
-    for i = 0 to channelLength - 1
-        float yS = f_map_to_price_at(i, sig[i])
-        array.push(points_sig, chart.point.from_index(bar_index[i], yS))
-    if showSignalLine
-        pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
-
-    // 라벨
-    float y_now = f_map_to_price_at(0, rsi)
-    lbl_rsi := label.new(bar_index, (upper_end + lower_end) / 2, "카르마 RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
-
-    if showRsiUpperThresholdLabels
-        lbl_hi := label.new(bar_index, upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
-    if showRsiLowerThresholdLabels
-        lbl_lo := label.new(bar_index, lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    rsiPlot.update()
 
     string slopeText = "기울기: " + str.format("{0,number,0.###}%", channelPercentChange)
     if na(lblSlope)
