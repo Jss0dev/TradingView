@@ -1,0 +1,288 @@
+//@version=6
+import "KarmaRSILib" as k
+indicator("카르마RSI (lib)", overlay=true, max_bars_back=500)
+
+// ═══════════════════════════════════════════════════════════════
+// [계산 입력값] CALC INPUTS
+// ═══════════════════════════════════════════════════════════════
+
+// 채널 설정
+channelSettings = "Channel 설정"
+int   channelLength        = input.int(120, "채널 길이", minval=2, maxval=500,group=channelSettings)
+float channelWidth = input.float(1.5, "채널 폭", step=0.1, minval=0.1, group=channelSettings)
+bool  calcFiboChannel = input.bool(false, "피보나치 채널 확장", group=channelSettings)
+
+// 밴드 모드(기본=기존 방식 유지)
+groupMODE = "Band Mode"
+string bandMode = input.string("Percent (log) — 퍼센트", "모드 선택", options=["Absolute (linear) — 기존", "Percent (log) — 퍼센트"], group=groupMODE)
+bool   isPercent = (bandMode == "Percent (log) — 퍼센트")
+
+// RSI 설정
+rsiSettings = "RSI 설정"
+int   rsiLength         = input.int(14, "RSI 선 길이", minval=0, group=rsiSettings)
+int   signalLineLength  = input.int(14, "시그널 선 길이", minval=0, group=rsiSettings)
+
+// DIVERGENCE
+groupDIV = "DIVERGENCE"
+bool calc_div   = input.bool(false, "다이버전스 계산", group=groupDIV, tooltip="끄면 계산/표시/알림 모두 비활성")
+int  lbLeft     = input.int(5,  "좌측 룩백",  minval=1, group=groupDIV, inline="lb")
+int  lbRight    = input.int(5,  "우측 룩백",  minval=1, group=groupDIV, inline="lb")
+int  rgLower    = input.int(5,  "범위 하한", minval=1, group=groupDIV, inline="rg")
+int  rgUpper    = input.int(60, "범위 상한", minval=2, group=groupDIV, inline="rg")
+
+// ═══════════════════════════════════════════════════════════════
+// [스타일 입력값] STYLE INPUTS
+// ═══════════════════════════════════════════════════════════════
+
+// CHANNEL
+channelStyle = "Cnannel 스타일"
+bool  showOverBoughtLine   = input.bool(true, "과매수 라인", inline="과매수 라인", group=channelStyle)
+color overBoughtLineColor  = input.color(#a7abb9, "", group=channelStyle, inline="과매수 라인")
+
+bool  showMidLine      = input.bool(true, "중앙선", inline="중앙선", group=channelStyle)
+color midLineColor     = input.color(color.gray, "", inline="중앙선", group=channelStyle)
+
+bool  showOverSoldLine     = input.bool(true, "과매도 라인", inline = "과매도 라인", group=channelStyle)
+color overSoldLineColor    = input.color(color.gray, "", group=channelStyle, inline = "과매도 라인")
+
+bool  fillChannelBand  = input.bool(false, "백그라운드", inline="백그라운드", group=channelStyle)
+color channelBandColor = input.color(color.olive, "", inline = "백그라운드", group=channelStyle)
+
+// RSI
+rsiStyle = "RSI 스타일"
+bool showRsiLine_in        = input.bool(true, "RSI 선", inline = "RSI 선", group=rsiStyle)
+color rsiLineColor         = input.color(color.purple, "", inline = "RSI 선", group=rsiStyle)
+int rsiLineWidth           = input.int(3, "", minval=1, maxval=5, inline="RSI 선",group=rsiStyle)
+
+bool  showSignalLine_in    = input.bool(true, "시그널 선", inline = "시그널 선", group=rsiStyle)
+color signalLineColor      = input.color(color.rgb(255, 0, 0), "", inline = "시그널 선", group=rsiStyle)
+int signalLineWidth        = input.int(2, "", minval=1, maxval=5, inline="시그널 선",group=rsiStyle)
+
+// 퍼센트 모드에서는 RSI/시그널이 반드시 표시되도록 강제
+bool showRsiLine    = isPercent ? true : showRsiLine_in
+bool showSignalLine = isPercent ? true : showSignalLine_in
+
+labelStyle = "라벨 설정"
+bool  showRsiThresholdLabels = input.bool(true, "RSI 라벨 표시", group=labelStyle)
+bool  showRsiUpperThresholdLabels = showRsiThresholdLabels and showOverBoughtLine
+bool  showRsiLowerThresholdLabels = showRsiThresholdLabels and showOverSoldLine
+
+// DIVERGENCE (색상)
+color colRegBull = color.new(color.green,  0)
+color colRegBear = color.new(color.red,    0)
+color colHidBull = color.new(color.teal,   0)
+color colHidBear = color.new(color.orange, 0)
+
+// ═══════════════════════════════════════════════════════════════
+// [채널 계산] REGRESSION CHANNEL
+// ═══════════════════════════════════════════════════════════════
+[channel, pct, bar_ready] = k.calc_channel(close, channelLength, channelWidth, isPercent)
+
+// 라인/필 핸들
+var line     mid_line  = na
+var line     upper_line = na
+var line     lower_line = na
+var linefill ch_fill    = na
+var label    lblSlope   = na
+var array<line> fib_lines  = array.new_line()
+var array<label> fib_labels = array.new_label()
+var float[] fib_norm_levels = array.new_float()
+
+if array.size(fib_norm_levels) == 0
+    array.push(fib_norm_levels, 0.0)
+    array.push(fib_norm_levels, 0.236)
+    array.push(fib_norm_levels, 0.382)
+    array.push(fib_norm_levels, 0.618)
+    array.push(fib_norm_levels, 0.786)
+    array.push(fib_norm_levels, 1.0)
+    //array.push(fib_norm_levels, 1.618)
+// 채널 라인/필 업데이트
+if bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
+    // 중앙선
+    if na(mid_line)
+        mid_line := line.new(bar_index[channelLength], channel.reg_start, bar_index, channel.reg_end, xloc=xloc.bar_index, color=showMidLine ? midLineColor : na, style=line.style_dashed)
+    else
+        line.set_xy1(mid_line, bar_index[channelLength], channel.reg_start)
+        line.set_xy2(mid_line, bar_index,       channel.reg_end)
+
+    // 상/하단
+    if na(upper_line)
+        upper_line := line.new(bar_index[channelLength], channel.upper_start, bar_index, channel.upper_end, xloc=xloc.bar_index, color=showOverBoughtLine ? overBoughtLineColor : na, width=2)
+    else
+        line.set_xy1(upper_line, bar_index[channelLength], channel.upper_start)
+        line.set_xy2(upper_line, bar_index,         channel.upper_end)
+
+    if na(lower_line)
+        lower_line := line.new(bar_index[channelLength], channel.lower_start, bar_index, channel.lower_end, xloc=xloc.bar_index, color=showOverSoldLine ? overSoldLineColor : na, width=2)
+    else
+        line.set_xy1(lower_line, bar_index[channelLength], channel.lower_start)
+        line.set_xy2(lower_line, bar_index,         channel.lower_end)
+
+    // 채움
+    if fillChannelBand
+        if na(ch_fill) and not na(upper_line) and not na(lower_line)
+            ch_fill := linefill.new(upper_line, lower_line, channelBandColor)
+    else
+        if not na(ch_fill)
+            linefill.delete(ch_fill)
+            ch_fill := na
+
+// 준비 미충족 시 정리
+if not bar_ready or (isPercent ? na(pct.mult) : na(channel.dev))
+    if not na(mid_line)
+        line.delete(mid_line),  mid_line  := na
+    if not na(upper_line)
+        line.delete(upper_line), upper_line := na
+    if not na(lower_line)
+        line.delete(lower_line), lower_line := na
+    if not na(ch_fill)
+        linefill.delete(ch_fill), ch_fill := na
+    if not na(lblSlope)
+        label.delete(lblSlope), lblSlope := na
+
+// ═══════════════════════════════════════════════════════════════
+// [RSI & 시그널] RSI / SIGNAL
+// ═══════════════════════════════════════════════════════════════
+float rsi = ta.rsi(close, rsiLength)
+float sig = ta.sma(rsi,  signalLineLength)
+
+int   rsiUpper = 70
+int   rsiLower = 30
+
+// 폴리라인 핸들/라벨
+var polyline pl_rsi = na
+var polyline pl_sig = na
+var label    lbl_rsi = na
+var label    lbl_lo  = na
+var label    lbl_hi  = na
+var array<chart.point> points_rsi = array.new<chart.point>()
+var array<chart.point> points_sig = array.new<chart.point>()
+
+// 마지막 바에서만 폴리라인/라벨 갱신
+if barstate.islast and bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
+    // 정리
+    if not na(pl_rsi)
+        polyline.delete(pl_rsi), pl_rsi := na
+    if not na(pl_sig)
+        polyline.delete(pl_sig), pl_sig := na
+    if not na(lbl_rsi)
+        label.delete(lbl_rsi), lbl_rsi := na
+    if not na(lbl_lo)
+        label.delete(lbl_lo),  lbl_lo  := na
+    if not na(lbl_hi)
+        label.delete(lbl_hi),  lbl_hi  := na
+
+    // RSI 폴리라인
+    array.clear(points_rsi)
+    for i = 0 to channelLength - 1
+        float y = k.map_to_price_at(i, rsi[i], isPercent, channel, pct, rsiLower, rsiUpper, channelLength)
+        array.push(points_rsi, chart.point.from_index(bar_index[i], y))
+    if showRsiLine
+        pl_rsi := polyline.new(points_rsi, line_color=rsiLineColor, closed=false, force_overlay=true, line_width=rsiLineWidth)
+
+    // 시그널 폴리라인
+    array.clear(points_sig)
+    for i = 0 to channelLength - 1
+        float yS = k.map_to_price_at(i, sig[i], isPercent, channel, pct, rsiLower, rsiUpper, channelLength)
+        array.push(points_sig, chart.point.from_index(bar_index[i], yS))
+    if showSignalLine
+        pl_sig := polyline.new(points_sig, line_color=signalLineColor, closed=false, force_overlay=true, line_width=signalLineWidth)
+
+    // 라벨
+    float y_now = k.map_to_price_at(0, rsi, isPercent, channel, pct, rsiLower, rsiUpper, channelLength)
+    lbl_rsi := label.new(bar_index, (channel.upper_end + channel.lower_end) / 2, "RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+
+    if showRsiUpperThresholdLabels
+        lbl_hi := label.new(bar_index, channel.upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    if showRsiLowerThresholdLabels
+        lbl_lo := label.new(bar_index, channel.lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+
+    string slopeText = "기울기: " + str.format("{0,number,0.###}%", channel.percentChange)
+    if na(lblSlope)
+        lblSlope := label.new(bar_index, channel.upper_end, slopeText, style = label.style_label_lower_right, textcolor=chart.fg_color, color=color.new(color.black, 100) )
+    else
+        label.set_xy(lblSlope, bar_index, channel.upper_end)
+        label.set_text(lblSlope, slopeText)
+
+// 피보나치 채널 작도 부분 (수정된 버전)
+if barstate.islast
+    bool showFibo = isPercent and calcFiboChannel and bar_ready and not na(pct.mult)
+    if showFibo
+        int count = array.size(fib_norm_levels)
+        while array.size(fib_lines) < count
+            array.push(fib_lines, na)
+        while array.size(fib_labels) < count
+            array.push(fib_labels, na)
+            
+        // 피보나치 레벨을 우측으로 연장할 바 수 (채널 길이의 15%)
+        int extension_bars = math.max(math.round(channelLength * 0.15), 10)
+        
+        for i = 0 to count - 1
+            float n = array.get(fib_norm_levels, i)
+            
+            // 수정: 실제 차트상의 기울기를 기준으로 피보나치 채널 작도
+            // channel.percentChange >= 0이면 상승 추세, < 0이면 하락 추세
+            bool isRisingTrend = channel.percentChange >= 0
+
+            float y_start = isRisingTrend ? k.channel_level(n, channel.lower_start, channel.reg_start, channel.upper_start) : k.channel_level(n, channel.upper_start, channel.reg_start, channel.lower_start)
+            float y_end = isRisingTrend ? k.channel_level(n, channel.lower_end, channel.reg_end, channel.upper_end) : k.channel_level(n, channel.upper_end, channel.reg_end, channel.lower_end)
+            
+            // 피보나치 라인의 기울기 계산하여 우측으로 연장
+            float fib_slope = (y_end - y_start) / (channelLength - 1)
+            float y_extended = y_end + fib_slope * extension_bars
+                
+            line ln = array.get(fib_lines, i)
+            if na(ln)
+                ln := line.new(bar_index[channelLength], y_start, bar_index + extension_bars, y_extended, xloc=xloc.bar_index, color=chart.fg_color, style=line.style_dashed)
+                array.set(fib_lines, i, ln)
+            else
+                line.set_xy1(ln, bar_index[channelLength], y_start)
+                line.set_xy2(ln, bar_index + extension_bars, y_extended)
+            label lb = array.get(fib_labels, i)
+            string txt = n == 1.0 ? "1.0" : str.tostring(n)
+            if na(lb)
+                lb := label.new(bar_index + extension_bars, y_extended, txt, style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+                array.set(fib_labels, i, lb)
+            else
+                label.set_xy(lb, bar_index + extension_bars, y_extended)
+                label.set_text(lb, txt)
+    else
+        // fib_lines 안전 삭제
+        while array.size(fib_lines) > 0
+            line ln = array.pop(fib_lines)
+            if not na(ln)
+                line.delete(ln)
+
+        // fib_labels 안전 삭제
+        while array.size(fib_labels) > 0
+            label lb = array.pop(fib_labels)
+            if not na(lb)
+                label.delete(lb)
+
+// ═══════════════════════════════════════════════════════════════
+// [다이버전스 계산] DIVERGENCE CALC (Regular + Hidden)
+// ═══════════════════════════════════════════════════════════════
+bool regBull = false, regBear = false, hidBull = false, hidBear = false
+[regBull, regBear, hidBull, hidBear] = k.calc_divergence(rsi, lbLeft, lbRight, rgLower, rgUpper, low, high)
+
+// 다이버전스 마커용 좌표(전역 계산)
+float y_div = na
+if bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
+    y_div := k.map_to_price_at(lbRight, rsi[lbRight], isPercent, channel, pct, rsiLower, rsiUpper, channelLength)
+
+// 플래그(표시 가능 여부)
+bool canPlotDiv = calc_div and bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
+
+// ═══════════════════════════════════════════════════════════════
+// [다이버전스 표시/알림] (전역에서 호출: local scope 금지)
+// ═══════════════════════════════════════════════════════════════
+plotshape(canPlotDiv and regBull ? y_div : na, title="Regular Bullish", style=shape.labelup,   text="Reg Bull", color=colRegBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
+plotshape(canPlotDiv and regBear ? y_div : na, title="Regular Bearish", style=shape.labeldown, text="Reg Bear", color=colRegBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
+plotshape(canPlotDiv and hidBull ? y_div : na, title="Hidden Bullish",  style=shape.triangleup,   text="Hid Bull", color=colHidBull, textcolor=color.white, location=location.belowbar, offset=-lbRight)
+plotshape(canPlotDiv and hidBear ? y_div : na, title="Hidden Bearish",  style=shape.triangledown, text="Hid Bear", color=colHidBear, textcolor=color.white, location=location.abovebar, offset=-lbRight)
+
+// 알림
+alertcondition(calc_div and regBull, title="KarmaRSI Regular Bullish", message="KarmaRSI: Regular Bullish Divergence")
+alertcondition(calc_div and regBear, title="KarmaRSI Regular Bearish", message="KarmaRSI: Regular Bearish Divergence")
+alertcondition(calc_div and hidBull, title="KarmaRSI Hidden Bullish",  message="KarmaRSI: Hidden Bullish Divergence")
+alertcondition(calc_div and hidBear, title="KarmaRSI Hidden Bearish",  message="KarmaRSI: Hidden Bearish Divergence")

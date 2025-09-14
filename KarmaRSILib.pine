@@ -1,0 +1,106 @@
+//@version=6
+library("KarmaRSILib")
+
+type Channel
+    float slope
+    float intercept
+    float reg_start
+    float reg_end
+    float dev
+    float upper_start
+    float upper_end
+    float lower_start
+    float lower_end
+    float percentChange
+
+type PercentParams
+    float s
+    float c
+    float mult
+    float devLog
+
+export f_log_regression(src, len) =>
+    float ln  = math.log(math.max(src, 1e-10))
+    float y0  = ta.linreg(ln, len, 0)
+    float y1  = ta.linreg(ln, len, 1)
+    float a   = y0 - y1
+    float b   = y0 - a * (len - 1)
+    float s   = -a
+    float c   = a * len + b
+    [s, c]
+
+export f_inRange(cond, lo, hi) =>
+    int bars = ta.barssince(cond)
+    lo <= bars and bars <= hi
+
+export calc_channel(closeSeries, channelLength, channelWidth, isPercent) =>
+    Channel ch = Channel.new(na, na, na, na, na, na, na, na, na, na)
+    PercentParams pct = PercentParams.new(na, na, na, na)
+    bool ready = bar_index >= channelLength - 1
+    if ready
+        [sl, icp] = f_log_regression(closeSeries, channelLength)
+        ch.intercept := icp
+        ch.slope     := sl
+        ch.reg_start := math.exp(ch.intercept + ch.slope * channelLength)
+        ch.reg_end   := math.exp(ch.intercept + ch.slope * 1.0)
+        if isPercent
+            float lnClose = math.log(math.max(closeSeries, 1e-10))
+            pct.devLog := ta.stdev(lnClose, channelLength)
+            pct.mult   := math.exp(pct.devLog * channelWidth)
+            pct.s      := ch.slope
+            pct.c      := ch.intercept
+            ch.upper_start := ch.reg_start * pct.mult
+            ch.upper_end   := ch.reg_end   * pct.mult
+            ch.lower_start := ch.reg_start / pct.mult
+            ch.lower_end   := ch.reg_end   / pct.mult
+        else
+            ch.dev         := ta.stdev(closeSeries, channelLength)
+            ch.upper_start := ch.reg_start + ch.dev * channelWidth
+            ch.upper_end   := ch.reg_end   + ch.dev * channelWidth
+            ch.lower_start := ch.reg_start - ch.dev * channelWidth
+            ch.lower_end   := ch.reg_end   - ch.dev * channelWidth
+        ch.percentChange := (ch.reg_end - ch.reg_start) / ch.reg_start * 100
+    [ch, pct, ready]
+
+export map_to_price_at(idx, r, isPercent, ch, pct, rsiLower, rsiUpper, channelLength) =>
+    if isPercent
+        float reg = math.exp(pct.c + pct.s * (1.0 + idx))
+        float lo = reg / pct.mult
+        float hi = reg * pct.mult
+        lo + (hi - lo) * (r - rsiLower) / (rsiUpper - rsiLower)
+    else
+        float lower_slope = (ch.lower_start - ch.lower_end) / (channelLength - 1)
+        float step        = (ch.upper_end   - ch.lower_end) / (rsiUpper - rsiLower)
+        float base        = ch.lower_end + lower_slope * idx
+        base + step * (r - rsiLower)
+
+export channel_level(level, yLower, yMid, yUpper) =>
+    if level <= 0.5
+        yLower + (yMid - yLower) * (level - 0.3) / 0.2
+    else
+        yMid + (yUpper - yMid) * (level - 0.5) / 0.2
+
+export calc_divergence(rsiSeries, lbLeft, lbRight, rgLower, rgUpper, lowSeries, highSeries) =>
+    bool regBull = false, regBear = false, hidBull = false, hidBear = false
+    bool plFound = not na(ta.pivotlow(rsiSeries, lbLeft, lbRight))
+    bool phFound = not na(ta.pivothigh(rsiSeries, lbLeft, lbRight))
+    float rsiLBR  = rsiSeries[lbRight]
+    float lowLBR  = lowSeries[lbRight]
+    float highLBR = highSeries[lbRight]
+    float prev_rsiL_of_PL  = ta.valuewhen(plFound, rsiSeries[lbRight], 1)
+    float prev_lowL_of_PL  = ta.valuewhen(plFound, lowSeries[lbRight], 1)
+    float prev_rsiL_of_PH  = ta.valuewhen(phFound, rsiSeries[lbRight], 1)
+    float prev_highL_of_PH = ta.valuewhen(phFound, highSeries[lbRight], 1)
+    bool rsiHL   = not na(prev_rsiL_of_PL) and rsiLBR  > prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
+    bool priceLL = not na(prev_lowL_of_PL) and lowLBR  < prev_lowL_of_PL
+    regBull := plFound and rsiHL and priceLL
+    bool rsiLL   = not na(prev_rsiL_of_PL) and rsiLBR  < prev_rsiL_of_PL and f_inRange(plFound[1], rgLower, rgUpper)
+    bool priceHL = not na(prev_lowL_of_PL) and lowLBR  > prev_lowL_of_PL
+    hidBull := plFound and rsiLL and priceHL
+    bool rsiLH   = not na(prev_rsiL_of_PH) and rsiLBR  < prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
+    bool priceHH = not na(prev_highL_of_PH) and highLBR > prev_highL_of_PH
+    regBear := phFound and rsiLH and priceHH
+    bool rsiHH   = not na(prev_rsiL_of_PH) and rsiLBR  > prev_rsiL_of_PH and f_inRange(phFound[1], rgLower, rgUpper)
+    bool priceLH = not na(prev_highL_of_PH) and highLBR < prev_highL_of_PH
+    hidBear := phFound and rsiHH and priceLH
+    [regBull, regBear, hidBull, hidBear]
