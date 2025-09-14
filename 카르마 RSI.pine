@@ -99,52 +99,59 @@ f_inRange(cond, lo, hi) =>
 // ═══════════════════════════════════════════════════════════════
 bool  bar_ready   = bar_index >= channelLength - 1
 
-float slope       = na
-float intercept   = na
-float reg_start   = na
-float reg_end     = na
-float dev         = na
-float upper_start = na
-float upper_end   = na
-float lower_start = na
-float lower_end   = na
-float channelPercentChange = na
+// 채널 관련 변수들을 객체로 묶음
+type Channel
+    float slope
+    float intercept
+    float reg_start
+    float reg_end
+    float dev
+    float upper_start
+    float upper_end
+    float lower_start
+    float lower_end
+    float percentChange
 
-// 퍼센트 모드용 보조 변수
-float s_per = na
-float c_per = na
-float mult = na
-float devLog = na
+var Channel channel = Channel.new(na, na, na, na, na, na, na, na, na, na)
+
+// 퍼센트 모드용 보조 변수 객체
+type PercentParams
+    float s
+    float c
+    float mult
+    float devLog
+
+var PercentParams pct = PercentParams.new(na, na, na, na)
 
 if bar_ready
     // 공통: 로그 회귀 직선(로그 공간)
-    [slope, intercept] = f_log_regression(close, channelLength)
+    [channel.slope, channel.intercept] = f_log_regression(close, channelLength)
     // per축: 현재=1, 과거=len
-    reg_start := math.exp(intercept + slope * channelLength)
-    reg_end   := math.exp(intercept + slope * 1.0)
+    channel.reg_start := math.exp(channel.intercept + channel.slope * channelLength)
+    channel.reg_end   := math.exp(channel.intercept + channel.slope * 1.0)
 
     if isPercent
         // 로그 편차 기반 퍼센트 밴드
         float lnClose = math.log(math.max(close, 1e-10))
-        devLog := ta.stdev(lnClose, channelLength)
-        mult   := math.exp(devLog * channelWidth)
-        s_per  := slope
-        c_per  := intercept
+        pct.devLog := ta.stdev(lnClose, channelLength)
+        pct.mult   := math.exp(pct.devLog * channelWidth)
+        pct.s      := channel.slope
+        pct.c      := channel.intercept
 
-        upper_start := reg_start * mult
-        upper_end   := reg_end   * mult
-        lower_start := reg_start / mult
-        lower_end   := reg_end   / mult
+        channel.upper_start := channel.reg_start * pct.mult
+        channel.upper_end   := channel.reg_end   * pct.mult
+        channel.lower_start := channel.reg_start / pct.mult
+        channel.lower_end   := channel.reg_end   / pct.mult
     else
         // 기존 방식: 선형 가격 편차(== 현행과 완전히 동일)
-        dev         := ta.stdev(close, channelLength)
-        upper_start := reg_start + dev * channelWidth
-        upper_end   := reg_end   + dev * channelWidth
-        lower_start := reg_start - dev * channelWidth
-        lower_end   := reg_end   - dev * channelWidth
+        channel.dev         := ta.stdev(close, channelLength)
+        channel.upper_start := channel.reg_start + channel.dev * channelWidth
+        channel.upper_end   := channel.reg_end   + channel.dev * channelWidth
+        channel.lower_start := channel.reg_start - channel.dev * channelWidth
+        channel.lower_end   := channel.reg_end   - channel.dev * channelWidth
 
     // 채널 % 변화(현행 계산식 유지)
-    channelPercentChange := (reg_end - reg_start) / reg_start * 100
+    channel.percentChange := (channel.reg_end - channel.reg_start) / channel.reg_start * 100
 
 // 라인/필 핸들
 var line     mid_line  = na
@@ -165,26 +172,26 @@ if array.size(fib_norm_levels) == 0
     array.push(fib_norm_levels, 1.0)
     //array.push(fib_norm_levels, 1.618)
 // 채널 라인/필 업데이트
-if bar_ready and (isPercent ? not na(mult) : not na(dev))
+if bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
     // 중앙선
     if na(mid_line)
-        mid_line := line.new(bar_index[channelLength], reg_start, bar_index, reg_end, xloc=xloc.bar_index, color=showMidLine ? midLineColor : na, style=line.style_dashed)
+        mid_line := line.new(bar_index[channelLength], channel.reg_start, bar_index, channel.reg_end, xloc=xloc.bar_index, color=showMidLine ? midLineColor : na, style=line.style_dashed)
     else
-        line.set_xy1(mid_line, bar_index[channelLength], reg_start)
-        line.set_xy2(mid_line, bar_index,       reg_end)
+        line.set_xy1(mid_line, bar_index[channelLength], channel.reg_start)
+        line.set_xy2(mid_line, bar_index,       channel.reg_end)
 
     // 상/하단
     if na(upper_line)
-        upper_line := line.new(bar_index[channelLength], upper_start, bar_index, upper_end, xloc=xloc.bar_index, color=showOverBoughtLine ? overBoughtLineColor : na, width=2)
+        upper_line := line.new(bar_index[channelLength], channel.upper_start, bar_index, channel.upper_end, xloc=xloc.bar_index, color=showOverBoughtLine ? overBoughtLineColor : na, width=2)
     else
-        line.set_xy1(upper_line, bar_index[channelLength], upper_start)
-        line.set_xy2(upper_line, bar_index,         upper_end)
+        line.set_xy1(upper_line, bar_index[channelLength], channel.upper_start)
+        line.set_xy2(upper_line, bar_index,         channel.upper_end)
 
     if na(lower_line)
-        lower_line := line.new(bar_index[channelLength], lower_start, bar_index, lower_end, xloc=xloc.bar_index, color=showOverSoldLine ? overSoldLineColor : na, width=2)
+        lower_line := line.new(bar_index[channelLength], channel.lower_start, bar_index, channel.lower_end, xloc=xloc.bar_index, color=showOverSoldLine ? overSoldLineColor : na, width=2)
     else
-        line.set_xy1(lower_line, bar_index[channelLength], lower_start)
-        line.set_xy2(lower_line, bar_index,         lower_end)
+        line.set_xy1(lower_line, bar_index[channelLength], channel.lower_start)
+        line.set_xy2(lower_line, bar_index,         channel.lower_end)
 
     // 채움
     if fillChannelBand
@@ -196,7 +203,7 @@ if bar_ready and (isPercent ? not na(mult) : not na(dev))
             ch_fill := na
 
 // 준비 미충족 시 정리
-if not bar_ready or (isPercent ? na(mult) : na(dev))
+if not bar_ready or (isPercent ? na(pct.mult) : na(channel.dev))
     if not na(mid_line)
         line.delete(mid_line),  mid_line  := na
     if not na(upper_line)
@@ -220,20 +227,20 @@ int   rsiLower = 30
 // 기존(절대) 모드용 매핑 준비: 직선 가정(현행과 동일 유지)
 float lower_slope = na
 float step        = na
-if (not isPercent) and bar_ready and not na(dev)
-    lower_slope := (lower_start - lower_end) / (channelLength - 1)
-    step        := (upper_end   - lower_end) / (rsiUpper - rsiLower)
+if (not isPercent) and bar_ready and not na(channel.dev)
+    lower_slope := (channel.lower_start - channel.lower_end) / (channelLength - 1)
+    step        := (channel.upper_end   - channel.lower_end) / (rsiUpper - rsiLower)
 
 // 퍼센트 모드용: 각 i에서 밴드를 직접 계산
 f_reg_at(i) =>
     // per = 1 + i (0=현재)
-    math.exp(c_per + s_per * (1.0 + i))
+    math.exp(pct.c + pct.s * (1.0 + i))
 
 f_upper_at(i) =>
-    f_reg_at(i) * mult
+    f_reg_at(i) * pct.mult
 
 f_lower_at(i) =>
-    f_reg_at(i) / mult
+    f_reg_at(i) / pct.mult
 
 // RSI→가격 매핑 (idx: 0=현재..length-1=과거)
 f_map_to_price_at(idx, r) =>
@@ -242,7 +249,7 @@ f_map_to_price_at(idx, r) =>
         float hi = f_upper_at(idx)
         lo + (hi - lo) * (r - rsiLower) / (rsiUpper - rsiLower)
     else
-        float base = lower_end + lower_slope * idx
+        float base = channel.lower_end + lower_slope * idx
         base + step * (r - rsiLower)
 
 f_channel_level(level, yLower, yMid, yUpper) =>
@@ -261,7 +268,7 @@ var array<chart.point> points_rsi = array.new<chart.point>()
 var array<chart.point> points_sig = array.new<chart.point>()
 
 // 마지막 바에서만 폴리라인/라벨 갱신
-if barstate.islast and bar_ready and (isPercent ? not na(mult) : not na(dev))
+if barstate.islast and bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
     // 정리
     if not na(pl_rsi)
         polyline.delete(pl_rsi), pl_rsi := na
@@ -292,23 +299,23 @@ if barstate.islast and bar_ready and (isPercent ? not na(mult) : not na(dev))
 
     // 라벨
     float y_now = f_map_to_price_at(0, rsi)
-    lbl_rsi := label.new(bar_index, (upper_end + lower_end) / 2, "RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+    lbl_rsi := label.new(bar_index, (channel.upper_end + channel.lower_end) / 2, "RSI: " + str.tostring(rsi, "#.##"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
 
     if showRsiUpperThresholdLabels
-        lbl_hi := label.new(bar_index, upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+        lbl_hi := label.new(bar_index, channel.upper_end, str.tostring(rsiUpper, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
     if showRsiLowerThresholdLabels
-        lbl_lo := label.new(bar_index, lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
+        lbl_lo := label.new(bar_index, channel.lower_end, str.tostring(rsiLower, "##.#"), style=label.style_label_left, textcolor=chart.fg_color, color=color.new(color.black, 100))
 
-    string slopeText = "기울기: " + str.format("{0,number,0.###}%", channelPercentChange)
+    string slopeText = "기울기: " + str.format("{0,number,0.###}%", channel.percentChange)
     if na(lblSlope)
-        lblSlope := label.new(bar_index, upper_end, slopeText, style = label.style_label_lower_right, textcolor=chart.fg_color, color=color.new(color.black, 100) )
+        lblSlope := label.new(bar_index, channel.upper_end, slopeText, style = label.style_label_lower_right, textcolor=chart.fg_color, color=color.new(color.black, 100) )
     else
-        label.set_xy(lblSlope, bar_index, upper_end)
+        label.set_xy(lblSlope, bar_index, channel.upper_end)
         label.set_text(lblSlope, slopeText)
 
 // 피보나치 채널 작도 부분 (수정된 버전)
 if barstate.islast
-    bool showFibo = isPercent and calcFiboChannel and bar_ready and not na(mult)
+    bool showFibo = isPercent and calcFiboChannel and bar_ready and not na(pct.mult)
     if showFibo
         int count = array.size(fib_norm_levels)
         while array.size(fib_lines) < count
@@ -323,11 +330,11 @@ if barstate.islast
             float n = array.get(fib_norm_levels, i)
             
             // 수정: 실제 차트상의 기울기를 기준으로 피보나치 채널 작도
-            // channelPercentChange >= 0이면 상승 추세, < 0이면 하락 추세
-            bool isRisingTrend = channelPercentChange >= 0
-            
-            float y_start = isRisingTrend ? f_channel_level(n, lower_start, reg_start, upper_start) : f_channel_level(n, upper_start, reg_start, lower_start)
-            float y_end = isRisingTrend ? f_channel_level(n, lower_end, reg_end, upper_end) : f_channel_level(n, upper_end, reg_end, lower_end)
+            // channel.percentChange >= 0이면 상승 추세, < 0이면 하락 추세
+            bool isRisingTrend = channel.percentChange >= 0
+
+            float y_start = isRisingTrend ? f_channel_level(n, channel.lower_start, channel.reg_start, channel.upper_start) : f_channel_level(n, channel.upper_start, channel.reg_start, channel.lower_start)
+            float y_end = isRisingTrend ? f_channel_level(n, channel.lower_end, channel.reg_end, channel.upper_end) : f_channel_level(n, channel.upper_end, channel.reg_end, channel.lower_end)
             
             // 피보나치 라인의 기울기 계산하여 우측으로 연장
             float fib_slope = (y_end - y_start) / (channelLength - 1)
@@ -404,11 +411,11 @@ if calc_div
 
 // 다이버전스 마커용 좌표(전역 계산)
 float y_div = na
-if bar_ready and (isPercent ? not na(mult) : not na(dev))
+if bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
     y_div := f_map_to_price_at(lbRight, rsi[lbRight])
 
 // 플래그(표시 가능 여부)
-bool canPlotDiv = calc_div and bar_ready and (isPercent ? not na(mult) : not na(dev))
+bool canPlotDiv = calc_div and bar_ready and (isPercent ? not na(pct.mult) : not na(channel.dev))
 
 // ═══════════════════════════════════════════════════════════════
 // [다이버전스 표시/알림] (전역에서 호출: local scope 금지)
