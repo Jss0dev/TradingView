@@ -1,0 +1,51 @@
+//@version=6
+indicator("TTM Squeeze (v6, canonical)", shorttitle="TTM Squeeze v6", overlay=false, max_labels_count=500)
+
+// ——— Inputs
+groupCore   = "Core"
+len         = input.int(20, "Length", minval=1, group=groupCore)
+bbMult      = input.float(2.0, "BB Mult", step=0.1, group=groupCore)
+kcMult      = input.float(1.5, "KC Mult (ATR)", step=0.1, group=groupCore)
+src         = input.source(close, "Source", group=groupCore)
+
+groupDisp   = "Display"
+showZeroDot = input.bool(true,  "Show squeeze dots on zero line", group=groupDisp)
+histWidth   = input.int(2, "Histogram width", minval=1, maxval=5, group=groupDisp)
+
+// ——— Bollinger Bands
+bbBasis = ta.sma(src, len)
+bbDev   = bbMult * ta.stdev(src, len)
+bbU     = bbBasis + bbDev
+bbL     = bbBasis - bbDev
+
+// ——— Keltner Channels (ATR-based; ATR uses RMA under the hood)
+kcBasis = ta.ema(src, len)
+kcHalf  = kcMult * ta.atr(len)
+kcU     = kcBasis + kcHalf
+kcL     = kcBasis - kcHalf
+
+// ——— Squeeze states
+squeezeOn  = (bbU < kcU) and (bbL > kcL)    // BB inside KC
+squeezeOff = (bbU > kcU) or  (bbL < kcL)    // BB outside KC
+
+// ——— Momentum proxy (common community variant)
+mom = ta.linreg(src - ta.sma(src, len), len, 0)
+
+// ——— Colors for histogram
+momUp   = mom > 0
+rising  = mom > mom[1]
+histCol = momUp ? (rising ? color.teal   : color.green) : (rising ? color.fuchsia: color.purple)
+
+// ——— Plots
+plot(mom, title="Momentum", style=plot.style_histogram, color=histCol, linewidth=histWidth)
+plot(0,   title="Zero", color=color.new(color.gray, 80))
+
+// Dots on zero line: red = squeeze on, lime = squeeze off, gray = neutral
+dotColor = squeezeOn ? color.red : squeezeOff ? color.lime : color.new(color.gray, 70)
+plot(showZeroDot ? 0 : na, title="Squeeze Dot", style=plot.style_circles, color=dotColor, linewidth=3)
+
+// ——— Alerts (const messages to satisfy v6 constraints)
+alertcondition(squeezeOn,  title="Squeeze ON",   message="TTM Squeeze: SQUEEZE ON")
+alertcondition(squeezeOff, title="Squeeze OFF",  message="TTM Squeeze: SQUEEZE OFF")
+alertcondition(ta.crossover(mom, 0), title="Momentum Cross Up",   message="TTM Squeeze: MOMENTUM CROSS UP")
+alertcondition(ta.crossunder(mom, 0), title="Momentum Cross Down", message="TTM Squeeze: MOMENTUM CROSS DOWN")
