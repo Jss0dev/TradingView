@@ -93,13 +93,44 @@ getBucketColor(int bucketIndex) =>
     array.get(runPalette, safeIndex)
 
 ensureBucketArrays(int bucketCount) =>
-    bucketLowerBounds := array.new_float(bucketCount, na)
-    bucketUpperBounds := array.new_float(bucketCount, na)
-    bucketRangeText   := array.new_string(bucketCount, "—")
-    bucketSumLenPos   := array.new_float(bucketCount, 0.0)
-    bucketSumLenNeg   := array.new_float(bucketCount, 0.0)
-    bucketCntPos      := array.new_int(bucketCount, 0)
-    bucketCntNeg      := array.new_int(bucketCount, 0)
+    while array.size(bucketLowerBounds) > bucketCount
+        array.pop(bucketLowerBounds)
+    while array.size(bucketUpperBounds) > bucketCount
+        array.pop(bucketUpperBounds)
+    while array.size(bucketRangeText) > bucketCount
+        array.pop(bucketRangeText)
+    while array.size(bucketSumLenPos) > bucketCount
+        array.pop(bucketSumLenPos)
+    while array.size(bucketSumLenNeg) > bucketCount
+        array.pop(bucketSumLenNeg)
+    while array.size(bucketCntPos) > bucketCount
+        array.pop(bucketCntPos)
+    while array.size(bucketCntNeg) > bucketCount
+        array.pop(bucketCntNeg)
+
+    while array.size(bucketLowerBounds) < bucketCount
+        array.push(bucketLowerBounds, na)
+    while array.size(bucketUpperBounds) < bucketCount
+        array.push(bucketUpperBounds, na)
+    while array.size(bucketRangeText) < bucketCount
+        array.push(bucketRangeText, "—")
+    while array.size(bucketSumLenPos) < bucketCount
+        array.push(bucketSumLenPos, 0.0)
+    while array.size(bucketSumLenNeg) < bucketCount
+        array.push(bucketSumLenNeg, 0.0)
+    while array.size(bucketCntPos) < bucketCount
+        array.push(bucketCntPos, 0)
+    while array.size(bucketCntNeg) < bucketCount
+        array.push(bucketCntNeg, 0)
+
+    for idx = 0 to bucketCount - 1
+        array.set(bucketLowerBounds, idx, na)
+        array.set(bucketUpperBounds, idx, na)
+        array.set(bucketRangeText, idx, "—")
+        array.set(bucketSumLenPos, idx, 0.0)
+        array.set(bucketSumLenNeg, idx, 0.0)
+        array.set(bucketCntPos, idx, 0)
+        array.set(bucketCntNeg, idx, 0)
 
 pickBucket(float value, int bucketCount) =>
     result = 0
