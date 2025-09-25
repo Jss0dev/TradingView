@@ -12,6 +12,12 @@ groupDisp   = "Display"
 showZeroDot = input.bool(true,  "Show squeeze dots on zero line", group=groupDisp)
 histWidth   = input.int(2, "Histogram width", minval=1, maxval=5, group=groupDisp)
 
+groupRun        = "Run analytics"
+isRunActive     = input.bool(false, "Enable run analytics", group=groupRun)
+runPeriod       = input.int(120, "Stats window", minval=20, group=groupRun)
+runBucketCount  = input.int(5, "Bucket count", minval=2, maxval=9, group=groupRun)
+runBucketMode   = input.string("SIGMA_BANDS", "Bucket mode", options=["SIGMA_BANDS", "EQUAL_WIDTH"], group=groupRun)
+
 // ——— Bollinger Bands
 bbBasis = ta.sma(src, len)
 bbDev   = bbMult * ta.stdev(src, len)
@@ -43,6 +49,353 @@ plot(0,   title="Zero", color=color.new(color.gray, 80))
 // Dots on zero line: red = squeeze on, lime = squeeze off, gray = neutral
 dotColor = squeezeOn ? color.red : squeezeOff ? color.lime : color.new(color.gray, 70)
 plot(showZeroDot ? 0 : na, title="Squeeze Dot", style=plot.style_circles, color=dotColor, linewidth=3)
+
+// ——— Run analytics helpers and state
+var color[] runPalette = array.from(color.rgb(42, 157, 244), color.rgb(76, 201, 240), color.rgb(94, 223, 174), color.rgb(139, 214, 74), color.rgb(208, 197, 57), color.rgb(240, 163, 55), color.rgb(242, 109, 59), color.rgb(217, 68, 114), color.rgb(167, 36, 189))
+
+var int[]   runStarts     = array.new_int()
+var int[]   runEnds       = array.new_int()
+var int[]   runLengths    = array.new_int()
+var int[]   runSigns      = array.new_int()
+var float[] runPeaksAbs   = array.new_float()
+var int[]   runPeakIndex  = array.new_int()
+var float[] runPeakMom    = array.new_float()
+var label[] runLabels     = array.new<label>()
+
+var float[] bucketLowerBounds = array.new_float()
+var float[] bucketUpperBounds = array.new_float()
+var string[] bucketRangeText  = array.new_string()
+var float[] bucketSumLenPos   = array.new_float()
+var float[] bucketSumLenNeg   = array.new_float()
+var int[]   bucketCntPos      = array.new_int()
+var int[]   bucketCntNeg      = array.new_int()
+
+var table runStatsTable = na
+var label liveRunLabel = na
+
+var int   activeRunSign       = 0
+var int   activeRunLength     = 0
+var int   activeRunStartIndex = 0
+var float activeRunMaxAbs     = 0.0
+var int   activeRunPeakIndex  = na
+var float activeRunPeakMom    = na
+
+var bool  wasRunFeatureActive = false
+var int   lastBucketCount     = na
+
+formatValue(val) =>
+    valRounded = math.round(val * 100.0) / 100.0
+    str.tostring(valRounded)
+
+getBucketColor(int bucketIndex) =>
+    paletteSize = array.size(runPalette)
+    safeIndex = math.min(math.max(bucketIndex - 1, 0), paletteSize - 1)
+    array.get(runPalette, safeIndex)
+
+ensureBucketArrays(int bucketCount) =>
+    while array.size(bucketLowerBounds) > bucketCount
+        array.pop(bucketLowerBounds)
+    while array.size(bucketUpperBounds) > bucketCount
+        array.pop(bucketUpperBounds)
+    while array.size(bucketRangeText) > bucketCount
+        array.pop(bucketRangeText)
+    while array.size(bucketSumLenPos) > bucketCount
+        array.pop(bucketSumLenPos)
+    while array.size(bucketSumLenNeg) > bucketCount
+        array.pop(bucketSumLenNeg)
+    while array.size(bucketCntPos) > bucketCount
+        array.pop(bucketCntPos)
+    while array.size(bucketCntNeg) > bucketCount
+        array.pop(bucketCntNeg)
+
+    while array.size(bucketLowerBounds) < bucketCount
+        array.push(bucketLowerBounds, na)
+    while array.size(bucketUpperBounds) < bucketCount
+        array.push(bucketUpperBounds, na)
+    while array.size(bucketRangeText) < bucketCount
+        array.push(bucketRangeText, "—")
+    while array.size(bucketSumLenPos) < bucketCount
+        array.push(bucketSumLenPos, 0.0)
+    while array.size(bucketSumLenNeg) < bucketCount
+        array.push(bucketSumLenNeg, 0.0)
+    while array.size(bucketCntPos) < bucketCount
+        array.push(bucketCntPos, 0)
+    while array.size(bucketCntNeg) < bucketCount
+        array.push(bucketCntNeg, 0)
+
+    for idx = 0 to bucketCount - 1
+        array.set(bucketLowerBounds, idx, na)
+        array.set(bucketUpperBounds, idx, na)
+        array.set(bucketRangeText, idx, "—")
+        array.set(bucketSumLenPos, idx, 0.0)
+        array.set(bucketSumLenNeg, idx, 0.0)
+        array.set(bucketCntPos, idx, 0)
+        array.set(bucketCntNeg, idx, 0)
+
+pickBucket(float value, int bucketCount) =>
+    result = 0
+    if not na(value)
+        for idx = 0 to bucketCount - 1
+            lower = array.get(bucketLowerBounds, idx)
+            upper = array.get(bucketUpperBounds, idx)
+            if not na(lower)
+                inLower = value >= lower
+                inUpper = na(upper) ? true : (idx == bucketCount - 1 ? value <= upper : value < upper)
+                if inLower and inUpper
+                    result := idx + 1
+                    break
+    result
+
+updateRunLabel(int index, int bucketIndex) =>
+    if index >= 0 and index < array.size(runLabels)
+        lbl = array.get(runLabels, index)
+        if not na(lbl)
+            baseColor = bucketIndex <= 0 ? color.gray : getBucketColor(bucketIndex)
+            sign      = array.get(runSigns, index)
+            if sign > 0
+                label.set_color(lbl, color.new(baseColor, 85))
+                label.set_textcolor(lbl, color.new(baseColor, 0))
+            else
+                label.set_color(lbl, color.new(baseColor, 0))
+                label.set_textcolor(lbl, color.white)
+
+cleanupRunArtifacts() =>
+    for i = 0 to array.size(runLabels) - 1
+        lbl = array.get(runLabels, i)
+        if not na(lbl)
+            label.delete(lbl)
+    array.clear(runStarts)
+    array.clear(runEnds)
+    array.clear(runLengths)
+    array.clear(runSigns)
+    array.clear(runPeaksAbs)
+    array.clear(runPeakIndex)
+    array.clear(runPeakMom)
+    array.clear(runLabels)
+    activeRunSign       := 0
+    activeRunLength     := 0
+    activeRunStartIndex := 0
+    activeRunMaxAbs     := 0.0
+    activeRunPeakIndex  := na
+    activeRunPeakMom    := na
+    if not na(liveRunLabel)
+        label.delete(liveRunLabel)
+        liveRunLabel := na
+    if not na(runStatsTable)
+        table.delete(runStatsTable)
+        runStatsTable := na
+    lastBucketCount := na
+
+buildSigmaBoundaries(int bucketCount, float sigma) =>
+    step = 0.5
+    for idx = 0 to bucketCount - 1
+        lowerStep = step * idx
+        upperStep = step * (idx + 1)
+        lowerVal  = sigma * lowerStep
+        upperVal  = idx == bucketCount - 1 ? na : sigma * upperStep
+        array.set(bucketLowerBounds, idx, lowerVal)
+        array.set(bucketUpperBounds, idx, upperVal)
+        lowerStr = formatValue(lowerStep)
+        upperStr = formatValue(upperStep)
+        rangeStr = idx == bucketCount - 1 ? str.format("[≥{0}σ]", lowerStr) : str.format("[{0}–{1}σ)", lowerStr, upperStr)
+        array.set(bucketRangeText, idx, rangeStr)
+
+buildEqualWidthBoundaries(int bucketCount) =>
+    runCount = array.size(runPeaksAbs)
+    minVal = na
+    maxVal = na
+    for i = 0 to runCount - 1
+        v = array.get(runPeaksAbs, i)
+        if na(minVal) or v < minVal
+            minVal := v
+        if na(maxVal) or v > maxVal
+            maxVal := v
+    if na(minVal) or na(maxVal)
+        for idx = 0 to bucketCount - 1
+            array.set(bucketLowerBounds, idx, na)
+            array.set(bucketUpperBounds, idx, na)
+            array.set(bucketRangeText, idx, "—")
+    else if minVal == maxVal
+        for idx = 0 to bucketCount - 1
+            array.set(bucketLowerBounds, idx, idx == 0 ? minVal : na)
+            array.set(bucketUpperBounds, idx, idx == 0 ? minVal : na)
+            array.set(bucketRangeText, idx, idx == 0 ? str.format("[={0}]", formatValue(minVal)) : "—")
+    else
+        width = (maxVal - minVal) / bucketCount
+        for idx = 0 to bucketCount - 1
+            lowerVal = minVal + width * idx
+            upperVal = idx == bucketCount - 1 ? maxVal : lowerVal + width
+            array.set(bucketLowerBounds, idx, lowerVal)
+            array.set(bucketUpperBounds, idx, upperVal)
+            lowerStr = formatValue(lowerVal)
+            upperStr = formatValue(upperVal)
+            rangeStr = idx == bucketCount - 1 ? str.format("[{0}–{1}]", lowerStr, upperStr) : str.format("[{0}–{1})", lowerStr, upperStr)
+            array.set(bucketRangeText, idx, rangeStr)
+
+recalculateBucketsAndStats(int bucketCount, string bucketMode, float sigma) =>
+    ensureBucketArrays(bucketCount)
+    if bucketMode == "SIGMA_BANDS"
+        buildSigmaBoundaries(bucketCount, sigma)
+    else
+        buildEqualWidthBoundaries(bucketCount)
+
+    runTotal = array.size(runLengths)
+    for idx = 0 to runTotal - 1
+        v     = array.get(runPeaksAbs, idx)
+        sign  = array.get(runSigns, idx)
+        bucket = pickBucket(v, bucketCount)
+        updateRunLabel(idx, bucket)
+        if bucket > 0
+            bucketIndex = bucket - 1
+            lenValue = array.get(runLengths, idx)
+            if sign > 0
+                array.set(bucketSumLenPos, bucketIndex, array.get(bucketSumLenPos, bucketIndex) + lenValue)
+                array.set(bucketCntPos, bucketIndex, array.get(bucketCntPos, bucketIndex) + 1)
+            else
+                array.set(bucketSumLenNeg, bucketIndex, array.get(bucketSumLenNeg, bucketIndex) + lenValue)
+                array.set(bucketCntNeg, bucketIndex, array.get(bucketCntNeg, bucketIndex) + 1)
+
+updateRunTable(int bucketCount, int nowLength, int nowBucket) =>
+    headerBg = color.new(color.gray, 80)
+    textColor = color.new(color.white, 0)
+    if na(runStatsTable) or bucketCount != lastBucketCount
+        if not na(runStatsTable)
+            table.delete(runStatsTable)
+        runStatsTable := table.new(position.top_right, 7, bucketCount + 2, border_width=1)
+        lastBucketCount := bucketCount
+
+    if not na(runStatsTable)
+        table.cell(runStatsTable, 0, 0, "", bgcolor=headerBg)
+        table.cell(runStatsTable, 1, 0, "Bucket", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
+        table.cell(runStatsTable, 2, 0, "Range", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
+        table.cell(runStatsTable, 3, 0, "+AvgBars", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
+        table.cell(runStatsTable, 4, 0, "−AvgBars", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
+        table.cell(runStatsTable, 5, 0, "+Cnt", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
+        table.cell(runStatsTable, 6, 0, "−Cnt", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
+
+        for idx = 0 to bucketCount - 1
+            row = idx + 1
+            bucketColor = getBucketColor(idx + 1)
+            table.cell(runStatsTable, 0, row, "", bgcolor=bucketColor)
+            table.cell(runStatsTable, 1, row, str.tostring(idx + 1), text_color=textColor, text_halign=text.align_center)
+            table.cell(runStatsTable, 2, row, array.get(bucketRangeText, idx), text_color=textColor, text_halign=text.align_center)
+
+            posCnt = array.get(bucketCntPos, idx)
+            negCnt = array.get(bucketCntNeg, idx)
+            posAvg = posCnt > 0 ? array.get(bucketSumLenPos, idx) / posCnt : na
+            negAvg = negCnt > 0 ? array.get(bucketSumLenNeg, idx) / negCnt : na
+
+            table.cell(runStatsTable, 3, row, na(posAvg) ? "—" : formatValue(posAvg), text_color=textColor, text_halign=text.align_center)
+            table.cell(runStatsTable, 4, row, na(negAvg) ? "—" : formatValue(negAvg), text_color=textColor, text_halign=text.align_center)
+            table.cell(runStatsTable, 5, row, str.tostring(posCnt), text_color=textColor, text_halign=text.align_center)
+            table.cell(runStatsTable, 6, row, str.tostring(negCnt), text_color=textColor, text_halign=text.align_center)
+
+        footerRow = bucketCount + 1
+        nowLabel = nowLength > 0 ? (nowBucket <= 0 ? str.format("Now: L={0}, Bucket=—", nowLength) : str.format("Now: L={0}, Bucket=B{1}", nowLength, nowBucket)) : ""
+        table.cell(runStatsTable, 0, footerRow, nowLabel, text_color=color.new(color.white, 60), text_halign=text.align_left)
+        for col = 1 to 6
+            table.cell(runStatsTable, col, footerRow, "")
+
+updateLiveRunMarker(int nowBucket) =>
+    if activeRunSign != 0 and not na(activeRunPeakIndex) and not na(activeRunPeakMom)
+        baseColor = nowBucket <= 0 ? color.gray : getBucketColor(nowBucket)
+        plotColor = nowBucket <= 0 ? color.new(baseColor, 70) : color.new(baseColor, 65)
+        outlineColor = color.new(baseColor, 0)
+        if na(liveRunLabel)
+            liveRunLabel := label.new(activeRunPeakIndex, activeRunPeakMom, "", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_circle, size=size.tiny, color=plotColor, textcolor=outlineColor)
+        else
+            label.set_xy(liveRunLabel, activeRunPeakIndex, activeRunPeakMom)
+            label.set_color(liveRunLabel, plotColor)
+            label.set_textcolor(liveRunLabel, outlineColor)
+    else
+        if not na(liveRunLabel)
+            label.delete(liveRunLabel)
+            liveRunLabel := na
+
+dropExpiredRuns(int period) =>
+    while array.size(runEnds) > 0
+        endIndex = array.get(runEnds, 0)
+        if bar_index - endIndex > period
+            array.shift(runStarts)
+            array.shift(runEnds)
+            array.shift(runLengths)
+            array.shift(runSigns)
+            array.shift(runPeaksAbs)
+            array.shift(runPeakIndex)
+            array.shift(runPeakMom)
+            lbl = array.shift(runLabels)
+            if not na(lbl)
+                label.delete(lbl)
+        else
+            break
+
+finalizeActiveRun(int endIndex) =>
+    if activeRunSign != 0 and activeRunLength > 0 and not na(activeRunPeakIndex) and not na(activeRunPeakMom)
+        labelForRun = label.new(activeRunPeakIndex, activeRunPeakMom, "", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_circle, size=size.tiny)
+        array.push(runStarts, activeRunStartIndex)
+        array.push(runEnds, int(math.max(activeRunStartIndex, endIndex)))
+        array.push(runLengths, activeRunLength)
+        array.push(runSigns, activeRunSign)
+        array.push(runPeaksAbs, activeRunMaxAbs)
+        array.push(runPeakIndex, activeRunPeakIndex)
+        array.push(runPeakMom, activeRunPeakMom)
+        array.push(runLabels, labelForRun)
+    activeRunSign       := 0
+    activeRunLength     := 0
+    activeRunStartIndex := 0
+    activeRunMaxAbs     := 0.0
+    activeRunPeakIndex  := na
+    activeRunPeakMom    := na
+
+processRunAnalytics() =>
+    if not isRunActive
+        if wasRunFeatureActive
+            cleanupRunArtifacts()
+        wasRunFeatureActive := false
+        return
+
+    wasRunFeatureActive := true
+    if barstate.isconfirmed
+        if na(mom)
+            if activeRunSign != 0
+                finalizeActiveRun(bar_index - 1)
+        else
+            currentSign = mom > 0 ? 1 : mom < 0 ? -1 : 0
+            absMom = math.abs(mom)
+            if activeRunSign != 0 and (currentSign != activeRunSign or currentSign == 0)
+                finalizeActiveRun(bar_index - 1)
+            if currentSign != 0
+                if activeRunSign == currentSign
+                    activeRunLength += 1
+                    if absMom >= activeRunMaxAbs
+                        activeRunMaxAbs    := absMom
+                        activeRunPeakIndex := bar_index
+                        activeRunPeakMom   := mom
+                else
+                    activeRunSign       := currentSign
+                    activeRunLength     := 1
+                    activeRunStartIndex := bar_index
+                    activeRunMaxAbs     := absMom
+                    activeRunPeakIndex  := bar_index
+                    activeRunPeakMom    := mom
+            else
+                activeRunSign := 0
+                activeRunLength := 0
+                activeRunStartIndex := 0
+                activeRunMaxAbs := 0.0
+                activeRunPeakIndex := na
+                activeRunPeakMom := na
+
+        dropExpiredRuns(runPeriod)
+
+    sigmaRaw = ta.stdev(math.abs(mom), runPeriod)
+    sigmaSafe = math.max(na(sigmaRaw) ? 0.0 : sigmaRaw, 1e-10)
+    recalculateBucketsAndStats(runBucketCount, runBucketMode, sigmaSafe)
+    predictedBucket = activeRunSign != 0 ? pickBucket(activeRunMaxAbs, runBucketCount) : 0
+    updateRunTable(runBucketCount, activeRunLength, predictedBucket)
+    updateLiveRunMarker(predictedBucket)
+
+processRunAnalytics()
 
 // ——— Alerts (const messages to satisfy v6 constraints)
 alertcondition(squeezeOn,  title="Squeeze ON",   message="TTM Squeeze: SQUEEZE ON")
