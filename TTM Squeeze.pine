@@ -270,19 +270,18 @@ updateRunTable(table statsTable, int prevLastBucketCount, int bucketCount, int n
         table.cell(newTable, 4, 0, "−AvgBars", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
         table.cell(newTable, 5, 0, "+Cnt", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
         table.cell(newTable, 6, 0, "−Cnt", text_color=textColor, bgcolor=headerBg, text_halign=text.align_center)
-
+        
         for idx = 0 to bucketCount - 1
             row = idx + 1
             bucketColor = getBucketColor(idx + 1)
             table.cell(newTable, 0, row, "", bgcolor=bucketColor)
             table.cell(newTable, 1, row, str.tostring(idx + 1), text_color=textColor, text_halign=text.align_center)
             table.cell(newTable, 2, row, array.get(bucketRangeText, idx), text_color=textColor, text_halign=text.align_center)
-
             posCnt = array.get(bucketCntPos, idx)
             negCnt = array.get(bucketCntNeg, idx)
             posAvg = posCnt > 0 ? array.get(bucketSumLenPos, idx) / posCnt : na
             negAvg = negCnt > 0 ? array.get(bucketSumLenNeg, idx) / negCnt : na
-
+            
             table.cell(newTable, 3, row, na(posAvg) ? "—" : formatValue(posAvg), text_color=textColor, text_halign=text.align_center)
             table.cell(newTable, 4, row, na(negAvg) ? "—" : formatValue(negAvg), text_color=textColor, text_halign=text.align_center)
             table.cell(newTable, 5, row, str.tostring(posCnt), text_color=textColor, text_halign=text.align_center)
@@ -330,7 +329,7 @@ dropExpiredRuns(int period) =>
                 label.delete(lbl)
         else
             break
-
+            
 finalizeActiveRun(int runSign, int runLength, int runStartIndex, float runMaxAbs, int runPeakIndexValue, float runPeakMomValue, int endIndex) =>
     if runSign != 0 and runLength > 0 and not na(runPeakIndexValue) and not na(runPeakMomValue)
         labelForRun = label.new(runPeakIndexValue, runPeakMomValue, "", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_circle, size=size.tiny)
@@ -363,6 +362,7 @@ else
             currentSign = mom > 0 ? 1 : mom < 0 ? -1 : 0
             absMom = math.abs(mom)
             if activeRunSign != 0 and (currentSign != activeRunSign or currentSign == 0)
+
                 finalizeActiveRun(activeRunSign, activeRunLength, activeRunStartIndex, activeRunMaxAbs, activeRunPeakIndex, activeRunPeakMom, bar_index - 1)
                 [activeRunSign, activeRunLength, activeRunStartIndex, activeRunMaxAbs, activeRunPeakIndex, activeRunPeakMom] := resetActiveRunState()
             if currentSign != 0
